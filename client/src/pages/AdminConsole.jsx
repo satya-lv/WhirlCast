@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Edit2, Trash2, Upload, Download, X, CheckCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Plus, Edit2, Trash2, Upload, Download } from 'lucide-react';
 import Modal from '../components/shared/Modal';
 import { useToast } from '../context/ToastContext';
 import { PageHeader } from '../components/shared/PageHeader';
@@ -17,10 +17,8 @@ export default function AdminConsole() {
   const [users, setUsers] = useState([]);
   const [showAddUser, setShowAddUser] = useState(false);
   const [showAddLfl, setShowAddLfl] = useState(false);
-  const [showEditProduct, setShowEditProduct] = useState(null);
   const [newUser, setNewUser] = useState({ name: '', email: '', role: 'demand_planning', branch_access: 'All' });
   const [newLfl, setNewLfl] = useState({ old_sku: '', new_sku: '', effective_date: '', reason: '' });
-  const csvRef = useRef();
 
   useEffect(() => {
     fetch('/api/admin/products').then(r => r.json()).then(d => setProducts(d.products || []));

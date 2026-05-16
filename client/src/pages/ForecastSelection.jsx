@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Trophy, CheckCircle, Trash2, Eye, ChevronDown } from 'lucide-react';
-import { ComposedChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from 'recharts';
+import { Trophy, CheckCircle } from 'lucide-react';
+import { ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import Modal from '../components/shared/Modal';
 import { useToast } from '../context/ToastContext';
 import { PageHeader } from '../components/shared/PageHeader';
@@ -27,7 +27,6 @@ export default function ForecastSelection() {
   const [finalizing, setFinalizing] = useState(false);
   const [finalScenario, setFinalScenario] = useState('');
   const [showFinalModal, setShowFinalModal] = useState(false);
-  const [finalDone, setFinalDone] = useState(false);
 
   useEffect(() => {
     fetch('/api/scenarios')

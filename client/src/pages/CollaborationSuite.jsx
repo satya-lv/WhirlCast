@@ -46,6 +46,7 @@ export default function CollaborationSuite() {
   const [loading, setLoading]       = useState(true);
 
   // Sync activeBranch from URL param changes (demand_planning only)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (user?.role === 'branch_sales') return;
     const b = searchParams.get('branch');
@@ -53,6 +54,7 @@ export default function CollaborationSuite() {
   }, [searchParams]);
 
   // Load all branch data in parallel on mount / after submit
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     setLoading(true);
     const branchesToLoad = user?.role === 'branch_sales' ? [user.branch] : BRANCHES;

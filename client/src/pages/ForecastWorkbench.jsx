@@ -1,13 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Info, ChevronDown, Play, Save, AlertTriangle, CheckCircle, X, BarChart2, Table2, Pencil } from 'lucide-react';
-import { ComposedChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from 'recharts';
+import { Play, Save, AlertTriangle, BarChart2, Pencil } from 'lucide-react';
+import { ComposedChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import Modal from '../components/shared/Modal';
 import { useToast } from '../context/ToastContext';
 import { PageHeader } from '../components/shared/PageHeader';
 
 const BRANCHES = ['Mumbai','New Delhi','Kolkata','Chennai','Bangalore','Hyderabad','Pune','Ahmedabad'];
-const SKUS = ['REF_190L_DirectCool','REF_240L_FrostFree','REF_340L_TripleDoor','WM_7KG_TopLoad','WM_8KG_FrontLoad','WM_6.5KG_SemiAuto','AC_1.5T_Inverter','AC_2.0T_Split','MW_25L_Convection','IH_3B_SmartGlass'];
-const CATEGORIES = ['Direct Cool Refrigerator','Frost Free Refrigerator','Washing Machine','Air Conditioner','Microwave','Induction'];
 const ALGORITHMS = ['SARIMAX','ARIMA','Exponential Smoothing','Moving Average','Random Forest','XGBoost','Prophet'];
 const MONTHS_FWD = ['Feb\'26','Mar\'26','Apr\'26','May\'26','Jun\'26','Jul\'26'];
 
@@ -91,7 +89,7 @@ export default function ForecastWorkbench() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: scenarioName, notes: scenarioNotes, forecast_runs: result }),
       });
-      const data = await resp.json();
+      await resp.json();
       toast.success('✅ Scenario saved to library');
       setScenarioName('');
     } catch (e) {
