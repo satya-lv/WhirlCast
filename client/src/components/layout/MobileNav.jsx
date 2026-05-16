@@ -1,7 +1,7 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { LayoutDashboard, Wrench, GitCompare, Users, AlertTriangle, Sparkles, PlusCircle, FileBarChart, Settings } from 'lucide-react';
+import { LayoutDashboard, Wrench, GitCompare, Users, AlertTriangle, FileBarChart, Settings } from 'lucide-react';
 
 const ROLE_NAVS = {
   demand_planning: [
