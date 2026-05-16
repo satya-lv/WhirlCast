@@ -27,6 +27,7 @@ export default function ForecastSelection() {
   const [finalizing, setFinalizing] = useState(false);
   const [finalScenario, setFinalScenario] = useState('');
   const [showFinalModal, setShowFinalModal] = useState(false);
+  const [, setFinalDone] = useState(false);
 
   useEffect(() => {
     fetch('/api/scenarios')
