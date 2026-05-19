@@ -35,6 +35,7 @@ export default function Dashboard() {
   const [cycleSteps, setCycleSteps] = useState(DEFAULT_STEPS);
   const [kpis, setKpis] = useState(null);
   const [liveBranches, setLiveBranches] = useState([]);
+  const [liveSummary, setLiveSummary] = useState(null);
 
   useEffect(() => {
     fetch('/api/dashboard')
@@ -53,6 +54,29 @@ export default function Dashboard() {
         }
       })
       .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const fetchLive = () => {
+      fetch('/api/forecast/live-summary')
+        .then(r => r.json())
+        .then(d => {
+          setLiveSummary(d);
+          const activeIdx =
+            d.cycle_status === 'signed_off' ? 5 :
+            d.cycle_status === 'resolved' || d.cycle_status === 'closed' ? 4 :
+            d.cycle_status === 'overrides_pending' ? 3 : 3;
+          setCycleSteps(DEFAULT_STEPS.map((s, i) => ({
+            ...s,
+            status: i < activeIdx ? 'done' : i === activeIdx ? 'current' : 'pending',
+            sub: i === 3 ? `${d.branches_submitted} of 8 submitted` : s.sub,
+          })));
+        })
+        .catch(() => {});
+    };
+    fetchLive();
+    const id = setInterval(fetchLive, 15000);
+    return () => clearInterval(id);
   }, []);
 
   const handleBranchClick = (branch) => {
@@ -133,9 +157,9 @@ export default function Dashboard() {
 
       {/* KPI Cards */}
       <div className="fade-up-2" style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : 'repeat(4,1fr)', gap: 12, marginBottom: 16 }}>
-        <KPICard label="Forecasted Units"      value={kpis ? toIndianNumber(kpis.totalUnits) : '1,24,850'}      badge="↑ 8.2% vs last cycle"  badgeType="up"   spark={SPARK_UNITS} accentColor="var(--navy-accent)" icon="📦"/>
+        <KPICard label="Forecasted Units"      value={liveSummary ? toIndianNumber(liveSummary.total_units) : kpis ? toIndianNumber(kpis.totalUnits) : '1,24,850'} badge="↑ 8.2% vs last cycle" badgeType="up" spark={SPARK_UNITS} accentColor="var(--navy-accent)" icon="📦"/>
         <KPICard label="Avg Forecast Accuracy" value={kpis ? `${kpis.accuracy}%` : '87.3%'}                   badge="↓ 1.2% · Target 90%"  badgeType="down" spark={SPARK_ACC}   accentColor="#D97706"            icon="🎯"/>
-        <KPICard label="Pending Overrides"     value={kpis ? `${kpis.pendingBranches} branches` : '5 branches'} badge="Due 20-May-2026"     badgeType="warn"                     accentColor="#F59E0B"            icon="⏳"/>
+        <KPICard label="Pending Overrides"     value={liveSummary ? `${8 - liveSummary.branches_submitted} branches` : kpis ? `${kpis.pendingBranches} branches` : '5 branches'} badge={liveSummary ? `${liveSummary.conflicts_pending} conflicts` : 'Due 20-May-2026'} badgeType="warn" accentColor="#F59E0B" icon="⏳"/>
         <KPICard label="Predicted Revenue"     value="₹148.2 Cr"                                               badge="↑ 11.4% vs last cycle" badgeType="up"   spark={SPARK_REV}  accentColor="var(--red)"         icon="₹"/>
       </div>
 
@@ -244,6 +268,19 @@ export default function Dashboard() {
           </div>
         </div>
 
+      </div>
+
+      {/* Live data indicator */}
+      <div style={{
+        position: 'fixed', bottom: isMobile ? 76 : 20, right: 20, zIndex: 50,
+        display: 'flex', alignItems: 'center', gap: 6,
+        background: 'var(--card)', borderRadius: 20, padding: '5px 11px',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.12)', border: '0.5px solid var(--border)',
+        fontSize: 11, color: 'var(--text-2)',
+      }}>
+        <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#22C55E',
+          boxShadow: '0 0 0 3px rgba(34,197,94,0.25)' }}/>
+        Live data
       </div>
     </div>
   );

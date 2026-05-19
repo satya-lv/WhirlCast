@@ -15,8 +15,9 @@ const navConfig = {
     { path: '/report',         label: 'Report',      icon: '📄' },
   ],
   branch_sales:  [
-    { path: '/collaboration', label: 'My Forecast', icon: '💬' },
-    { path: '/report',        label: 'Report',      icon: '📄' },
+    { path: '/collaboration',  label: 'My Forecast', icon: '💬' },
+    { path: '/demand-sensing', label: '✦ Sensing',   icon: '✦'  },
+    { path: '/report',         label: 'Report',      icon: '📄' },
   ],
   category_team: [
     { path: '/conflicts',     label: 'Conflicts',     icon: '⚡' },
@@ -41,6 +42,24 @@ export default function Navbar() {
   const isMobile = useIsMobile();
   const [dark, setDark] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetting, setResetting] = useState(false);
+
+  const handleReset = async () => {
+    setResetting(true);
+    setShowResetModal(false);
+    try {
+      const res = await fetch('http://localhost:3001/api/demo/reset', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        alert('Demo reset — ready for walkthrough');
+        setTimeout(() => window.location.reload(), 1500);
+      }
+    } catch {
+      /* ignore */
+    }
+    setResetting(false);
+  };
 
   useEffect(() => {
     const saved = localStorage.getItem('demandiq-theme') || 'light';
@@ -119,6 +138,12 @@ export default function Navbar() {
                 color: 'rgba(255,255,255,0.55)', borderRadius: 8, padding: '5px 10px',
                 fontSize: 12, cursor: 'pointer', marginRight: 8 }}>
               {dark ? '☀ Light' : '◑ Dark'}
+            </button>
+            <button onClick={() => setShowResetModal(true)} disabled={resetting}
+              style={{ background: 'transparent', border: '0.5px solid rgba(255,255,255,0.25)',
+                color: 'rgba(255,255,255,0.55)', borderRadius: 7, padding: '5px 10px',
+                fontSize: 11, cursor: 'pointer', marginRight: 2 }}>
+              {resetting ? '⟳' : '↺ Reset'}
             </button>
             <div style={{ textAlign: 'right' }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: 'white' }}>{user.name}</div>
@@ -228,6 +253,37 @@ export default function Navbar() {
               <span>{tab.label.replace('✦ ', '')}</span>
             </NavLink>
           ))}
+        </div>
+      )}
+      {showResetModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+          zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }} onClick={() => setShowResetModal(false)}>
+          <div style={{
+            background: '#1a2235', border: '0.5px solid rgba(255,255,255,0.15)',
+            borderRadius: 14, padding: '28px 28px 24px', maxWidth: 380, width: '90%',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: 'white', marginBottom: 10 }}>Reset demo data?</div>
+            <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.55)', lineHeight: 1.6, marginBottom: 22 }}>
+              Reset all demo data? This will clear all overrides, conflicts and sign-offs and restore the demo to its starting state.
+            </div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button onClick={() => setShowResetModal(false)}
+                style={{ background: 'rgba(255,255,255,0.08)', border: '0.5px solid rgba(255,255,255,0.15)',
+                  color: 'rgba(255,255,255,0.7)', borderRadius: 8, padding: '8px 18px',
+                  fontSize: 13, cursor: 'pointer' }}>
+                Cancel
+              </button>
+              <button onClick={handleReset}
+                style={{ background: '#E31837', border: 'none',
+                  color: 'white', borderRadius: 8, padding: '8px 18px',
+                  fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                Confirm Reset
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </>

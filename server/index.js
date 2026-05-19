@@ -20,6 +20,7 @@ app.use('/api/npi', require('./routes/npi'));
 app.use('/api/report', require('./routes/report'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/demo',  require('./routes/demo'));
+app.use('/api/cycles', require('./routes/cycles'));
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', app: 'DemandIQ', version: '1.0.0' }));
 

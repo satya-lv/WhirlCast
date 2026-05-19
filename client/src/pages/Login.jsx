@@ -79,8 +79,14 @@ export default function Login() {
   const handleReset = async () => {
     setResetting(true);
     try {
-      await fetch('/api/demo/reset', { method: 'POST' });
-      setTimeout(() => setResetting(false), 1500);
+      const res = await fetch('http://localhost:3001/api/demo/reset', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        alert('Demo reset — ready for walkthrough');
+        setTimeout(() => window.location.reload(), 1500);
+      } else {
+        setResetting(false);
+      }
     } catch {
       setResetting(false);
     }

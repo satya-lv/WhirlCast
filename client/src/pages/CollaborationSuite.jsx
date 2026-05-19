@@ -11,6 +11,18 @@ import { useToast } from '../context/ToastContext';
 import { useIsMobile } from '../utils/useIsMobile';
 
 const BRANCHES = ['Mumbai','New Delhi','Kolkata','Chennai','Bangalore','Hyderabad','Pune','Ahmedabad'];
+const CAT_COLORS = {
+  'Direct Cool Refrigerator': { bg:'EFF6FF', text:'1D4ED8' },
+  'Frost Free Refrigerator':  { bg:'F0FDFA', text:'0F766E' },
+  'Washing Machine':          { bg:'F0FDF4', text:'166534' },
+  'Air Conditioner':          { bg:'FFFBEB', text:'92400E' },
+  'Microwave':                { bg:'FDF4FF', text:'7E22CE' },
+  'Induction':                { bg:'FFF7ED', text:'9A3412' },
+};
+const CatBadge = ({ cat }) => {
+  const c = CAT_COLORS[cat] || { bg:'F3F4F6', text:'374151' };
+  return <span style={{ background:`#${c.bg}`, color:`#${c.text}`, fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:20, whiteSpace:'nowrap' }}>{cat}</span>;
+};
 const REASONS  = ['A: Increase in ranging','B: New Promo/Activity','C: Pricing Change','D: Repipeline','E: Seasonality effects','F: Competitor Activity','G: Others'];
 const MONTHS   = ['02-2026','03-2026','04-2026','05-2026','06-2026','07-2026'];
 const MONTH_LABELS = ["Feb'26","Mar'26","Apr'26","May'26","Jun'26","Jul'26"];
@@ -97,6 +109,19 @@ export default function CollaborationSuite() {
     setExpandedRow(null);
   }, [activeBranch, allBranchData]);
 
+  const fetchBranchData = (branch) => {
+    fetch(`/api/collaboration/${branch}`)
+      .then(r => r.json())
+      .then(d => {
+        setAllBranchData(prev => ({ ...prev, [branch]: d }));
+        const status = d.submitted
+          ? (d.hasConflicts ? 'submitted_conflict' : 'submitted_clean')
+          : (d.hasConflicts ? 'conflict' : 'pending');
+        setBranchStatuses(prev => ({ ...prev, [branch]: status }));
+      })
+      .catch(() => {});
+  };
+
   const handleMapClick = (branch) => {
     if (user?.role === 'branch_sales') return;
     setActiveBranch(prev => prev === branch ? null : branch);
@@ -127,6 +152,7 @@ export default function CollaborationSuite() {
         body: JSON.stringify({ branch: activeBranch, sku, month, value: parseInt(val), reason: reasons[key] || '' }),
       });
       toast.success(`Override saved for ${sku}`);
+      fetchBranchData(activeBranch);
     } catch { toast.error('Save failed'); }
   };
 
@@ -141,13 +167,15 @@ export default function CollaborationSuite() {
     finally { setSubmitting(false); }
   };
 
-  const isEditable   = !!activeBranch;
-  const showBranchCol = !activeBranch;
+  const isEditable     = !!activeBranch && user?.role === 'branch_sales';
+  const isDpReadOnly   = !!activeBranch && user?.role === 'demand_planning';
+  const showActionsCol = !!activeBranch;
+  const showBranchCol  = !activeBranch;
   const tableRows = activeBranch
     ? (allBranchData[activeBranch]?.tableData || [])
     : BRANCHES.flatMap(b => (allBranchData[b]?.tableData || []).map(r => ({ ...r, _branch: b })));
 
-  const colCount = (showBranchCol ? 1 : 0) + 4 + MONTHS.length + (isEditable ? 1 : 0);
+  const colCount = (showBranchCol ? 1 : 0) + 4 + MONTHS.length + (showActionsCol ? 1 : 0);
 
   return (
     <div style={{ padding: isMobile ? '16px' : '24px', maxWidth: 1440, margin: '0 auto', background: 'var(--bg)', minHeight: 'calc(100vh - 52px)', paddingBottom: isMobile ? 80 : undefined }}>
@@ -174,6 +202,15 @@ export default function CollaborationSuite() {
         </div>
       )}
 
+      {user?.role === 'demand_planning' && (
+        <div style={{ background:'#FEF3C7', border:'1px solid #FCD34D', borderRadius:10, padding:'12px 16px', marginBottom:12, display:'flex', alignItems:'center', gap:10 }}>
+          <span style={{ fontSize:16 }}>🔒</span>
+          <span style={{ fontSize:13, color:'#92400E', flex:1 }}>
+            Read only — overrides are submitted by branch managers. You can see all branch data.
+          </span>
+        </div>
+      )}
+
       {/* Alert banner */}
       <div style={{ background:'#FFFBEB', border:'1px solid #FCD34D', borderRadius:10, padding:'12px 16px', marginBottom:20, display:'flex', alignItems:'center', gap:10 }}>
         <span style={{ fontSize:16 }}>📋</span>
@@ -191,15 +228,22 @@ export default function CollaborationSuite() {
         {/* Map card — 38% */}
         <div style={{ width: isMobile ? '100%' : '38%', flexShrink:0, background:'#0D1B35', borderRadius:16, padding:16 }}>
           <div style={{ fontSize:13, fontWeight:700, color:'white', marginBottom:4 }}>Branch Status Map</div>
-          <div style={{ fontSize:11, color:'rgba(255,255,255,0.4)', marginBottom:12 }}>
-            {user?.role === 'branch_sales' ? `Viewing: ${activeBranch}` : 'Click branch to filter table'}
-          </div>
+          {user?.role === 'branch_sales' ? (
+            <div style={{ marginBottom:12 }}>
+              <span style={{ background:'var(--navy-accent)', color:'white', borderRadius:20, padding:'3px 12px', fontSize:11, fontWeight:600 }}>
+                {activeBranch}
+              </span>
+            </div>
+          ) : (
+            <div style={{ fontSize:11, color:'rgba(255,255,255,0.4)', marginBottom:12 }}>Click branch to filter table</div>
+          )}
 
           <IndiaMap
             onBranchClick={handleMapClick}
             activeBranch={activeBranch}
             statusMap={branchStatuses}
             showAsFilter={user?.role !== 'branch_sales'}
+            lockedBranch={user?.role === 'branch_sales' ? user.branch : undefined}
           />
 
           {activeBranch && user?.role !== 'branch_sales' && (
@@ -241,7 +285,7 @@ export default function CollaborationSuite() {
                       ...(showBranchCol ? ['Branch'] : []),
                       'SKU','Category','Last 6M Actual','AI Forecast (6M)',
                       ...MONTH_LABELS.map(m => `${m} Override`),
-                      ...(isEditable ? ['Actions'] : []),
+                      ...(showActionsCol ? ['Actions'] : []),
                     ].map(h => (
                       <th key={h} style={{ padding:'10px 12px', fontSize:11, fontWeight:600, color:'#6B7280', textTransform:'uppercase', letterSpacing:'0.04em', borderBottom:'1px solid #E5E7EB', textAlign:'left', whiteSpace:'nowrap' }}>
                         {h}
@@ -278,7 +322,7 @@ export default function CollaborationSuite() {
                               {row.sku}
                             </div>
                           </td>
-                          <td style={{ padding:'10px 12px', color:'var(--text-2)' }}>{row.category}</td>
+                          <td style={{ padding:'10px 12px' }}><CatBadge cat={row.category}/></td>
                           <td style={{ padding:'10px 12px', color:'var(--text-1)' }}>{(row.months[0]?.last_6m_actual || 0).toLocaleString('en-IN')}</td>
                           <td style={{ padding:'10px 12px', fontWeight:600 }}>{aiTotal.toLocaleString('en-IN')}</td>
                           {row.months.map((m, mi) => {
@@ -313,6 +357,10 @@ export default function CollaborationSuite() {
                                       </select>
                                     )}
                                   </>
+                                ) : isDpReadOnly ? (
+                                  <input disabled value={val || ''} placeholder={m.ai_forecast || '—'}
+                                    style={{ width:70, padding:'5px 7px', border:'1px solid #E5E7EB', borderRadius:6, fontSize:11, background:'#F8FAFC', cursor:'not-allowed', color:'var(--text-2)' }}
+                                  />
                                 ) : (
                                   <span style={{ fontSize:11, color: val ? 'var(--text-1)' : 'var(--text-3)' }}>
                                     {val || (m.ai_forecast || '—')}
@@ -321,24 +369,28 @@ export default function CollaborationSuite() {
                               </td>
                             );
                           })}
-                          {isEditable && (
+                          {showActionsCol && (
                             <td style={{ padding:'10px 8px' }} onClick={e => e.stopPropagation()}>
-                              <div style={{ display:'flex', gap:4 }}>
-                                <button
-                                  onClick={() => row.months.forEach(m => saveOverride(row.sku, m.month))}
-                                  style={{ background:'#EFF6FF', border:'1px solid #BFDBFE', borderRadius:6, padding:'4px 7px', cursor:'pointer', display:'flex', alignItems:'center' }}>
-                                  <Save size={12} color="#1B3A6B"/>
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    const newOv = { ...overrides };
-                                    row.months.forEach(m => delete newOv[`${row.sku}|${m.month}`]);
-                                    setOverrides(newOv);
-                                  }}
-                                  style={{ background:'#FEF2F2', border:'1px solid #FECACA', borderRadius:6, padding:'4px 7px', cursor:'pointer', display:'flex', alignItems:'center' }}>
-                                  <RotateCcw size={12} color="#DC2626"/>
-                                </button>
-                              </div>
+                              {isEditable ? (
+                                <div style={{ display:'flex', gap:4 }}>
+                                  <button
+                                    onClick={() => row.months.forEach(m => saveOverride(row.sku, m.month))}
+                                    style={{ background:'#EFF6FF', border:'1px solid #BFDBFE', borderRadius:6, padding:'4px 7px', cursor:'pointer', display:'flex', alignItems:'center' }}>
+                                    <Save size={12} color="#1B3A6B"/>
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      const newOv = { ...overrides };
+                                      row.months.forEach(m => delete newOv[`${row.sku}|${m.month}`]);
+                                      setOverrides(newOv);
+                                    }}
+                                    style={{ background:'#FEF2F2', border:'1px solid #FECACA', borderRadius:6, padding:'4px 7px', cursor:'pointer', display:'flex', alignItems:'center' }}>
+                                    <RotateCcw size={12} color="#DC2626"/>
+                                  </button>
+                                </div>
+                              ) : (
+                                <span style={{ fontSize:15 }}>🔒</span>
+                              )}
                             </td>
                           )}
                         </tr>

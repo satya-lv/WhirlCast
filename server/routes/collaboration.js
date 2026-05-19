@@ -100,6 +100,14 @@ router.post('/override', (req, res) => {
       );
     }
 
+    const scenarioId = db.prepare(
+      `SELECT scenario_id FROM forecast_scenarios WHERE status='finalized' ORDER BY finalized_at DESC LIMIT 1`
+    ).get()?.scenario_id;
+    if (scenarioId && value != null) {
+      db.prepare(`UPDATE forecast_runs SET value=? WHERE branch=? AND sku=? AND month=? AND scenario_id=?`)
+        .run(value, branch, sku, month, scenarioId);
+    }
+
     db.close();
     res.json({ message: 'Override saved' });
   } catch (err) {

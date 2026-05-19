@@ -62,7 +62,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
 router.post('/apply', (req, res) => {
   try {
     const db = getDb();
-    const { log_id, adjustments } = req.body;
+    const { log_id, adjustments, branch_filter } = req.body;
     const cycle = db.prepare(`SELECT * FROM forecast_cycles ORDER BY cycle_id DESC LIMIT 1`).get();
 
     let skuCount = 0;
@@ -70,6 +70,7 @@ router.post('/apply', (req, res) => {
 
     for (const adj of adjustments || []) {
       const { sku, branch, month, adjustment_percent } = adj;
+      if (branch_filter && branch !== branch_filter) continue;
       const runs = db.prepare(`SELECT * FROM forecast_runs WHERE cycle_id=? AND sku=? AND branch=? AND month=?`).all(cycle.cycle_id, sku, branch, month);
       for (const run of runs) {
         const newVal = Math.round(run.value * (1 + adjustment_percent / 100));

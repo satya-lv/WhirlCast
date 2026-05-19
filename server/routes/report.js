@@ -47,6 +47,24 @@ router.get('/', (req, res) => {
       };
     });
 
+    const sid = scenario?.scenario_id;
+
+    const india_total = sid ? db.prepare(
+      `SELECT month, SUM(value) as value FROM forecast_runs WHERE scenario_id=? AND month IN ('02-2026','03-2026','04-2026','05-2026','06-2026','07-2026') GROUP BY month ORDER BY month`
+    ).all(sid) : [];
+
+    const by_category = sid ? db.prepare(
+      `SELECT pm.category, fr.month, SUM(fr.value) as value FROM forecast_runs fr JOIN product_master pm ON fr.sku=pm.sku WHERE fr.scenario_id=? AND fr.month IN ('02-2026','03-2026','04-2026','05-2026','06-2026','07-2026') GROUP BY pm.category, fr.month ORDER BY pm.category, fr.month`
+    ).all(sid) : [];
+
+    const by_branch = sid ? db.prepare(
+      `SELECT branch, month, SUM(value) as value FROM forecast_runs WHERE scenario_id=? AND month IN ('02-2026','03-2026','04-2026','05-2026','06-2026','07-2026') GROUP BY branch, month ORDER BY branch, month`
+    ).all(sid) : [];
+
+    const by_branch_sku = sid ? db.prepare(
+      `SELECT branch, sku, month, value FROM forecast_runs WHERE scenario_id=? AND month IN ('02-2026','03-2026','04-2026','05-2026','06-2026','07-2026') ORDER BY branch, sku, month`
+    ).all(sid) : [];
+
     db.close();
     res.json({
       kpis: {
@@ -70,6 +88,10 @@ router.get('/', (req, res) => {
       ],
       futureForecast,
       perfData,
+      india_total,
+      by_category,
+      by_branch,
+      by_branch_sku,
       cycle,
       scenario,
     });

@@ -45,8 +45,20 @@ router.post('/resolve', (req, res) => {
   try {
     const db = getDb();
     const { decisions } = req.body;
+
+    const scenarioId = db.prepare(
+      `SELECT scenario_id FROM forecast_scenarios WHERE status='finalized' ORDER BY finalized_at DESC LIMIT 1`
+    ).get()?.scenario_id;
+
     for (const d of decisions) {
       db.prepare(`UPDATE branch_overrides SET final_override=?, status='resolved' WHERE override_id=?`).run(d.final_value, d.override_id);
+      if (scenarioId && d.final_value != null) {
+        const ov = db.prepare(`SELECT branch, sku, month FROM branch_overrides WHERE override_id=?`).get(d.override_id);
+        if (ov) {
+          db.prepare(`UPDATE forecast_runs SET value=? WHERE branch=? AND sku=? AND month=? AND scenario_id=?`)
+            .run(d.final_value, ov.branch, ov.sku, ov.month, scenarioId);
+        }
+      }
     }
     db.close();
     res.json({ message: 'Decisions saved', count: decisions.length });

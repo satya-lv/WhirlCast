@@ -2,11 +2,47 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Upload, FileText, X, Sparkles, ToggleLeft, ToggleRight } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useToast } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 import { PageHeader } from '../components/shared/PageHeader';
 
 const IMPACT_COLORS = { high: '#DC2626', medium: '#D97706', low: '#16A34A' };
 const IMPACT_BG = { high: '#FEF2F2', medium: '#FFFBEB', low: '#F0FDF4' };
 const MONTHS = ['Feb\'26','Mar\'26','Apr\'26','May\'26','Jun\'26','Jul\'26'];
+
+const SAMPLE_INSIGHTS = [
+  {
+    insight_text: 'Q2 trade promotion for AC_1.5T_Inverter shows strong pre-sell signals. Expected 22% uplift in April–May across South and West branches based on retailer commitment data in the brief.',
+    impact_level: 'high',
+    affected_skus: ['AC_1.5T_Inverter', 'AC_2.0T_Split'],
+    affected_branches: ['Mumbai', 'Bangalore', 'Chennai', 'Hyderabad', 'Pune'],
+    suggested_adjustment_percent: 22,
+    confidence: 87,
+  },
+  {
+    insight_text: 'Refrigerator category positioned for early summer stocking push. Buy-2-Get-1 scheme in North and East regions driving 14% above-baseline retailer ordering.',
+    impact_level: 'medium',
+    affected_skus: ['REF_240L_FrostFree', 'REF_190L_DirectCool'],
+    affected_branches: ['New Delhi', 'Kolkata', 'Ahmedabad'],
+    suggested_adjustment_percent: 14,
+    confidence: 78,
+  },
+  {
+    insight_text: 'Washing machine top-load SKUs flagged for targeted summer campaign via modern trade. West region partners committed display space for Mar–Apr window.',
+    impact_level: 'medium',
+    affected_skus: ['WM_7KG_TopLoad', 'WM_6.5KG_SemiAuto'],
+    affected_branches: ['Mumbai', 'Pune', 'Ahmedabad'],
+    suggested_adjustment_percent: 11,
+    confidence: 72,
+  },
+  {
+    insight_text: 'Digital-first awareness drive for Microwave across all urban branches noted in the brief. Expected modest pull-forward of ~7% in May–June.',
+    impact_level: 'low',
+    affected_skus: ['MW_25L_Convection'],
+    affected_branches: ['Mumbai', 'New Delhi', 'Bangalore', 'Chennai', 'Kolkata', 'Hyderabad', 'Pune', 'Ahmedabad'],
+    suggested_adjustment_percent: 7,
+    confidence: 65,
+  },
+];
 
 const CustomTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
@@ -20,6 +56,8 @@ const CustomTooltip = ({ active, payload, label }) => {
 
 export default function DemandSensing() {
   const { toast } = useToast();
+  const { user }  = useAuth();
+  const isBranchSales = user?.role === 'branch_sales';
   const fileRef = useRef();
   const [dragOver, setDragOver] = useState(false);
   const [file, setFile] = useState(null);
@@ -71,24 +109,43 @@ export default function DemandSensing() {
     activeInsights.forEach((ins, i) => {
       const pct = adjPercents[i] ?? ins.suggested_adjustment_percent;
       ins.affected_skus?.forEach(sku => {
-        ins.affected_branches?.forEach(branch => {
-          ['02-2026','03-2026','04-2026','05-2026','06-2026','07-2026'].forEach(month => {
-            adjustments.push({ sku, branch, month, adjustment_percent: pct });
+        (ins.affected_branches || [])
+          .filter(branch => !isBranchSales || branch === user.branch)
+          .forEach(branch => {
+            ['02-2026','03-2026','04-2026','05-2026','06-2026','07-2026'].forEach(month => {
+              adjustments.push({ sku, branch, month, adjustment_percent: pct });
+            });
           });
-        });
       });
     });
     setApplying(true);
     try {
       const resp = await fetch('/api/demand-sensing/apply', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ log_id: logId, adjustments }),
+        body: JSON.stringify({ log_id: logId, adjustments, branch_filter: isBranchSales ? user.branch : null }),
       });
       const data = await resp.json();
       toast.ai(`✦ Demand adjustments applied to ${data.skuCount} SKUs across ${data.branchCount} branches. Forecasting Report updated.`);
       fetch('/api/demand-sensing/history').then(r => r.json()).then(d => setHistory(d.logs || []));
     } catch (e) { toast.error('Apply failed'); }
     finally { setApplying(false); }
+  };
+
+  const handleSampleClick = () => {
+    setFile({ name: 'Q2_Trade_Promo_Brief.pdf', size: 204800 });
+    setState('processing');
+    setTimeout(() => {
+      const initToggles = {};
+      const initAdj = {};
+      SAMPLE_INSIGHTS.forEach((ins, i) => { initToggles[i] = true; initAdj[i] = ins.suggested_adjustment_percent; });
+      setInsights(SAMPLE_INSIGHTS);
+      setToggles(initToggles);
+      setAdjPercents(initAdj);
+      setSummary('Q2 Trade Promotion Brief outlines a multi-SKU promotional push across AC, Refrigerator, and Washing Machine categories for Q2 2026. South and West branches lead AC commitments; North and East focus on refrigerator stocking incentives.');
+      setLogId(null);
+      setUsageLimitHit(false);
+      setState('done');
+    }, 1500);
   };
 
   const activeInsightCount = Object.values(toggles).filter(Boolean).length;
@@ -113,6 +170,14 @@ export default function DemandSensing() {
       <PageHeader title="✦ Demand Sensing"
         subtitle="AI-powered document analysis — upload any brief or report"
         helpText="Upload any document — trade promotion brief, weather advisory, competitor report, or email. The AI extracts demand signals and shows you a before/after forecast adjustment. You decide what to apply."/>
+
+      {isBranchSales && (
+        <div style={{ background:'linear-gradient(135deg, #15803D 0%, #166534 100%)', borderRadius:10, padding:'12px 18px', marginBottom:16, display:'flex', alignItems:'center', gap:12 }}>
+          <span style={{ fontSize:20 }}>📍</span>
+          <span style={{ fontSize:13, fontWeight:600, color:'white' }}>Branch Demand Sensing — adjustments apply to {user.branch} branch only</span>
+        </div>
+      )}
+
       {/* Header */}
       <div style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
@@ -214,13 +279,17 @@ export default function DemandSensing() {
           )}
 
           {/* Insights */}
-          {state === 'done' && insights.length > 0 && (
+          {state === 'done' && insights.length > 0 && (() => {
+            const visibleInsights = insights.filter(ins => !isBranchSales || (ins.affected_branches||[]).includes(user.branch));
+            return (
             <div>
               <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12, color: '#1B3A6B' }}>
-                ✦ {insights.length} demand signals extracted from {file?.name}
+                ✦ {visibleInsights.length} demand signals extracted from {file?.name}
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {insights.map((ins, i) => (
+                {insights.map((ins, i) => {
+                  if (isBranchSales && !(ins.affected_branches||[]).includes(user.branch)) return null;
+                  return (
                   <div key={i} className="slide-in-right" style={{
                     background: '#FFF', borderRadius: 12, padding: '14px 16px',
                     boxShadow: '0 2px 10px rgba(0,0,0,0.07)',
@@ -244,7 +313,9 @@ export default function DemandSensing() {
                       {(ins.affected_skus || []).map(s => <span key={s} style={{ background: '#EFF6FF', color: '#1B3A6B', borderRadius: 8, padding: '2px 7px', fontSize: 10, fontWeight: 600 }}>{s}</span>)}
                     </div>
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
-                      {(ins.affected_branches || []).map(b => <span key={b} style={{ background: '#F3F4F6', color: '#6B7280', borderRadius: 8, padding: '2px 7px', fontSize: 10 }}>{b}</span>)}
+                      {(ins.affected_branches || [])
+                        .filter(b => !isBranchSales || b === user.branch)
+                        .map(b => <span key={b} style={{ background: '#F3F4F6', color: '#6B7280', borderRadius: 8, padding: '2px 7px', fontSize: 10 }}>{b}</span>)}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                       <div style={{ fontSize: 11, color: '#6B7280' }}>Suggested adj:</div>
@@ -257,7 +328,8 @@ export default function DemandSensing() {
                       <span style={{ fontSize: 11, color: '#6B7280' }}>% &nbsp;|&nbsp; Confidence: <strong>{ins.confidence}%</strong></span>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
 
               {summary && (
@@ -267,7 +339,8 @@ export default function DemandSensing() {
                 </div>
               )}
             </div>
-          )}
+          );
+          })()}
         </div>
 
         {/* RIGHT: Adjustment Preview */}
@@ -300,7 +373,9 @@ export default function DemandSensing() {
                       <tbody>
                         {insights.filter((_, i) => toggles[i]).flatMap((ins, i) =>
                           (ins.affected_skus || []).slice(0, 2).flatMap(sku =>
-                            (ins.affected_branches || []).slice(0, 2).map(branch => ({
+                            (ins.affected_branches || [])
+                            .filter(branch => !isBranchSales || branch === user.branch)
+                            .slice(0, 2).map(branch => ({
                               sku, branch, adj: adjPercents[i] ?? ins.suggested_adjustment_percent, impact: ins.impact_level
                             }))
                           )
@@ -340,25 +415,35 @@ export default function DemandSensing() {
           </div>
 
           {/* History */}
-          {history.length > 0 && (
-            <div style={{ background: '#FFF', borderRadius: 12, padding: '20px', boxShadow: 'var(--shadow-sm)', border: '0.5px solid var(--border)' }}>
-              <h3 style={{ margin: '0 0 14px', fontSize: 14, fontWeight: 600 }}>Previously Applied — This Cycle</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {history.map((log, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#F8FAFF', borderRadius: 8, padding: '10px 12px' }}>
-                    <FileText size={16} color="#1B3A6B" />
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600 }}>{log.filename}</div>
-                      <div style={{ fontSize: 11, color: '#9CA3AF' }}>
-                        {new Date(log.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })} | {(log.insights || []).length} insights
-                      </div>
-                    </div>
-                    {log.applied === 1 && <span style={{ background: '#F0FDF4', color: '#16A34A', borderRadius: 12, padding: '2px 8px', fontSize: 10, fontWeight: 600 }}>✅ Applied</span>}
-                  </div>
-                ))}
+          <div style={{ background: '#FFF', borderRadius: 12, padding: '20px', boxShadow: 'var(--shadow-sm)', border: '0.5px solid var(--border)' }}>
+            <h3 style={{ margin: '0 0 14px', fontSize: 14, fontWeight: 600 }}>Previously Applied — This Cycle</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {/* Sample entry */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#EFF6FF', borderRadius: 8, padding: '10px 12px', border: '1px solid #BFDBFE' }}>
+                <FileText size={16} color="#1B3A6B" />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600 }}>Q2_Trade_Promo_Brief.pdf</div>
+                  <div style={{ fontSize: 11, color: '#9CA3AF' }}>20 May · 4 insights · Demo sample</div>
+                </div>
+                <button onClick={handleSampleClick} style={{
+                  background: '#1B3A6B', color: 'white', border: 'none', borderRadius: 8,
+                  padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                }}>Try this →</button>
               </div>
+              {history.map((log, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#F8FAFF', borderRadius: 8, padding: '10px 12px' }}>
+                  <FileText size={16} color="#1B3A6B" />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600 }}>{log.filename}</div>
+                    <div style={{ fontSize: 11, color: '#9CA3AF' }}>
+                      {new Date(log.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })} | {(log.insights || []).length} insights
+                    </div>
+                  </div>
+                  {log.applied === 1 && <span style={{ background: '#F0FDF4', color: '#16A34A', borderRadius: 12, padding: '2px 8px', fontSize: 10, fontWeight: 600 }}>✅ Applied</span>}
+                </div>
+              ))}
             </div>
-          )}
+          </div>
         </div>
       </div>
     </div>

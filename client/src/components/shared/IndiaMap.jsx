@@ -49,7 +49,7 @@ const METRICS = {
   Ahmedabad:  { units:'6,800',  acc:'86%', note:'Not submitted' },
 };
 
-export default function IndiaMap({ onBranchClick, branchData, activeBranch, statusMap, showAsFilter }) {
+export default function IndiaMap({ onBranchClick, branchData, activeBranch, statusMap, showAsFilter, lockedBranch }) {
   const [hov, setHov] = useState(null);
 
   const cities = DEFAULT_CITIES.map(c => {
@@ -100,34 +100,41 @@ export default function IndiaMap({ onBranchClick, branchData, activeBranch, stat
           const col = COLORS[city.status] || COLORS.pending;
           const isHov = hov === city.name;
           const isActive = activeBranch === city.name;
-          const pulse = city.status === 'conflict' || city.status === 'submitted_conflict'
-                     || city.status === 'exceeded' || city.status === 'submitted_exceeded';
+          const isLocked = lockedBranch === city.name;
+          const locked = !!lockedBranch;
+          const pulse = !locked && (city.status === 'conflict' || city.status === 'submitted_conflict'
+                     || city.status === 'exceeded' || city.status === 'submitted_exceeded');
           const m = METRICS[city.name] || {};
-          const dim = activeBranch && !isActive ? 0.35 : 1;
+          const dim = locked
+            ? (isLocked ? 1 : 0.15)
+            : (activeBranch && !isActive ? 0.35 : 1);
+          const noEvents = locked && !isLocked;
+          const showTip = isHov && (!locked || isLocked);
 
           return (
             <Marker key={city.name} coordinates={city.coords}
-              onClick={() => onBranchClick && onBranchClick(city.name)}
-              onMouseEnter={() => setHov(city.name)}
+              onClick={() => !noEvents && onBranchClick && onBranchClick(city.name)}
+              onMouseEnter={() => !noEvents && setHov(city.name)}
               onMouseLeave={() => setHov(null)}
-              style={{ cursor:'pointer', opacity: dim, transition:'opacity 0.2s' }}
+              style={{ cursor: noEvents ? 'default' : 'pointer', opacity: dim, transition:'opacity 0.2s', pointerEvents: noEvents ? 'none' : 'auto' }}
             >
               {pulse && <circle r="10" fill="none" stroke={col} strokeWidth="1.5" opacity="0" className="mp"/>}
-              {isActive && <circle r="13" fill="none" stroke="white" strokeWidth="2"/>}
+              {(isActive || isLocked) && <circle r="13" fill="none" stroke="white" strokeWidth="2"/>}
+              {isLocked && <circle r="11" fill="none" stroke="white" strokeWidth="2"/>}
               <circle r="11" fill={col} opacity="0.18"/>
               <circle r={isHov ? 7 : 5.5} fill={col} stroke="white" strokeWidth="1.5"
                 style={{ transition:'r 0.15s' }}/>
               <text textAnchor="middle" y={20}
                 style={{
                   fontSize:8,
-                  fill: isActive ? 'white' : 'rgba(255,255,255,0.75)',
-                  fontWeight: isActive ? 700 : 500,
+                  fill: (isActive || isLocked) ? 'white' : 'rgba(255,255,255,0.75)',
+                  fontWeight: (isActive || isLocked) ? 700 : 500,
                   fontFamily:'DM Sans,sans-serif',
                   pointerEvents:'none',
                 }}>
                 {city.name}
               </text>
-              {isHov && (
+              {showTip && (
                 <g transform="translate(10,-88)">
                   <rect width="128" height="90" rx="8" fill="white"
                     style={{ filter:'drop-shadow(0 4px 12px rgba(0,0,0,0.25))' }}/>
@@ -144,6 +151,11 @@ export default function IndiaMap({ onBranchClick, branchData, activeBranch, stat
           );
         })}
       </ComposableMap>
+      {lockedBranch && (
+        <div style={{ textAlign:'center', fontSize:11, color:'rgba(255,255,255,0.55)', marginTop:6 }}>
+          Your branch: <strong style={{ color:'white' }}>{lockedBranch}</strong>
+        </div>
+      )}
     </div>
   );
 }

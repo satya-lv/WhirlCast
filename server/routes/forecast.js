@@ -123,4 +123,42 @@ router.post('/save-scenario', (req, res) => {
   }
 });
 
+router.get('/live-summary', (req, res) => {
+  try {
+    const db = getDb();
+    const finalized = db.prepare(
+      `SELECT scenario_id FROM forecast_scenarios WHERE status='finalized' LIMIT 1`
+    ).get();
+
+    if (!finalized) {
+      return res.json({ total_units: 0, branches_submitted: 0, conflicts_pending: 0, cycle_status: 'not_started' });
+    }
+
+    const total = db.prepare(
+      `SELECT SUM(value) as total FROM forecast_runs WHERE scenario_id=?`
+    ).get(finalized.scenario_id);
+
+    const submitted = db.prepare(
+      `SELECT COUNT(DISTINCT branch) as cnt FROM branch_overrides WHERE status='submitted'`
+    ).get();
+
+    const conflicts = db.prepare(
+      `SELECT COUNT(*) as cnt FROM branch_overrides WHERE status='submitted' AND CAST(ABS(override_value-ai_forecast) AS FLOAT)/ai_forecast > 0.10`
+    ).get();
+
+    const cycle = db.prepare(
+      `SELECT status FROM forecast_cycles WHERE cycle_id=1`
+    ).get();
+
+    res.json({
+      total_units: total?.total || 0,
+      branches_submitted: submitted?.cnt || 0,
+      conflicts_pending: conflicts?.cnt || 0,
+      cycle_status: cycle?.status || 'unknown',
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
