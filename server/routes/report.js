@@ -8,7 +8,7 @@ router.get('/', (req, res) => {
     const cycle = db.prepare(`SELECT * FROM forecast_cycles ORDER BY cycle_id DESC LIMIT 1`).get();
     const scenario = db.prepare(`SELECT * FROM forecast_scenarios WHERE cycle_id=? AND status='finalized' LIMIT 1`).get(cycle.cycle_id);
 
-    const MONTHS_FWD = ['02-2026','03-2026','04-2026','05-2026','06-2026','07-2026'];
+    const MONTHS_FWD = ['06-2026','07-2026','08-2026','09-2026','10-2026','11-2026'];
     const MONTHS_HIST = ['07-2025','08-2025','09-2025','10-2025','11-2025','12-2025'];
     const ALL_MONTHS = [...MONTHS_HIST, ...MONTHS_FWD];
 
@@ -29,7 +29,7 @@ router.get('/', (req, res) => {
     });
 
     // Future forecast table
-    const futureForecast = db.prepare(`SELECT branch, sku, month, value, demand_sensing_adjusted FROM forecast_runs WHERE cycle_id=? AND scenario_id=? AND month IN ('02-2026','03-2026','04-2026','05-2026','06-2026','07-2026') ORDER BY branch, sku`).all(cycle.cycle_id, scenario?.scenario_id);
+    const futureForecast = db.prepare(`SELECT branch, sku, month, value, demand_sensing_adjusted FROM forecast_runs WHERE cycle_id=? AND scenario_id=? AND month IN ('06-2026','07-2026','08-2026','09-2026','10-2026','11-2026') ORDER BY branch, sku`).all(cycle.cycle_id, scenario?.scenario_id);
 
     // Historical performance (Dec 2025)
     const histPerf = db.prepare(`SELECT branch, sku, value FROM forecast_runs WHERE cycle_id=? AND month='12-2025' AND scenario_id=?`).all(cycle.cycle_id, scenario?.scenario_id);
@@ -50,19 +50,19 @@ router.get('/', (req, res) => {
     const sid = scenario?.scenario_id;
 
     const india_total = sid ? db.prepare(
-      `SELECT month, SUM(value) as value FROM forecast_runs WHERE scenario_id=? AND month IN ('02-2026','03-2026','04-2026','05-2026','06-2026','07-2026') GROUP BY month ORDER BY month`
+      `SELECT month, SUM(value) as value FROM forecast_runs WHERE scenario_id=? AND month IN ('06-2026','07-2026','08-2026','09-2026','10-2026','11-2026') GROUP BY month ORDER BY month`
     ).all(sid) : [];
 
     const by_category = sid ? db.prepare(
-      `SELECT pm.category, fr.month, SUM(fr.value) as value FROM forecast_runs fr JOIN product_master pm ON fr.sku=pm.sku WHERE fr.scenario_id=? AND fr.month IN ('02-2026','03-2026','04-2026','05-2026','06-2026','07-2026') GROUP BY pm.category, fr.month ORDER BY pm.category, fr.month`
+      `SELECT pm.category, fr.month, SUM(fr.value) as value FROM forecast_runs fr JOIN product_master pm ON fr.sku=pm.sku WHERE fr.scenario_id=? AND fr.month IN ('06-2026','07-2026','08-2026','09-2026','10-2026','11-2026') GROUP BY pm.category, fr.month ORDER BY pm.category, fr.month`
     ).all(sid) : [];
 
     const by_branch = sid ? db.prepare(
-      `SELECT branch, month, SUM(value) as value FROM forecast_runs WHERE scenario_id=? AND month IN ('02-2026','03-2026','04-2026','05-2026','06-2026','07-2026') GROUP BY branch, month ORDER BY branch, month`
+      `SELECT branch, month, SUM(value) as value FROM forecast_runs WHERE scenario_id=? AND month IN ('06-2026','07-2026','08-2026','09-2026','10-2026','11-2026') GROUP BY branch, month ORDER BY branch, month`
     ).all(sid) : [];
 
     const by_branch_sku = sid ? db.prepare(
-      `SELECT branch, sku, month, value FROM forecast_runs WHERE scenario_id=? AND month IN ('02-2026','03-2026','04-2026','05-2026','06-2026','07-2026') ORDER BY branch, sku, month`
+      `SELECT branch, sku, month, value FROM forecast_runs WHERE scenario_id=? AND month IN ('06-2026','07-2026','08-2026','09-2026','10-2026','11-2026') ORDER BY branch, sku, month`
     ).all(sid) : [];
 
     db.close();

@@ -53,7 +53,7 @@ router.post('/generate', (req, res) => {
     const cycle = db.prepare(`SELECT * FROM forecast_cycles ORDER BY cycle_id DESC LIMIT 1`).get();
     const products = db.prepare(`SELECT * FROM product_master WHERE active=1`).all();
 
-    const FMONTHS = ['02-2026','03-2026','04-2026','05-2026','06-2026','07-2026'];
+    const FMONTHS = ['06-2026','07-2026','08-2026','09-2026','10-2026','11-2026'];
     const forecastRuns = [];
     const exceptions = [];
 
@@ -124,40 +124,70 @@ router.post('/save-scenario', (req, res) => {
 });
 
 router.get('/live-summary', (req, res) => {
+  const db = getDb();
   try {
-    const db = getDb();
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+
+    const cycle = db.prepare(
+      `SELECT cycle_id, status FROM forecast_cycles ORDER BY cycle_id DESC LIMIT 1`
+    ).get();
+    const cycleId = cycle?.cycle_id;
+
     const finalized = db.prepare(
       `SELECT scenario_id FROM forecast_scenarios WHERE status='finalized' LIMIT 1`
     ).get();
 
-    if (!finalized) {
-      return res.json({ total_units: 0, branches_submitted: 0, conflicts_pending: 0, cycle_status: 'not_started' });
+    if (!finalized || !cycleId) {
+      return res.json({ total_units: 0, branches_submitted: 0, conflicts_pending: 0, cycle_status: 'not_started', total_branches: 8, branch_statuses: {} });
     }
 
     const total = db.prepare(
       `SELECT SUM(value) as total FROM forecast_runs WHERE scenario_id=?`
     ).get(finalized.scenario_id);
 
+    // Count all branches that have any override (submitted OR resolved) in this cycle
     const submitted = db.prepare(
-      `SELECT COUNT(DISTINCT branch) as cnt FROM branch_overrides WHERE status='submitted'`
-    ).get();
+      `SELECT COUNT(DISTINCT branch) as cnt FROM branch_overrides WHERE cycle_id=? AND status IN ('submitted','resolved')`
+    ).get(cycleId);
 
+    // Count unresolved conflicts (still 'submitted' with >10% deviation)
     const conflicts = db.prepare(
-      `SELECT COUNT(*) as cnt FROM branch_overrides WHERE status='submitted' AND CAST(ABS(override_value-ai_forecast) AS FLOAT)/ai_forecast > 0.10`
-    ).get();
+      `SELECT COUNT(*) as cnt FROM branch_overrides WHERE cycle_id=? AND status='submitted' AND ai_forecast > 0 AND CAST(ABS(COALESCE(override_value,0) - ai_forecast) AS FLOAT) / ai_forecast > 0.10`
+    ).get(cycleId);
 
-    const cycle = db.prepare(
-      `SELECT status FROM forecast_cycles WHERE cycle_id=1`
-    ).get();
+    const BRANCHES_ALL = ['Mumbai','New Delhi','Kolkata','Chennai','Bangalore','Hyderabad','Pune','Ahmedabad'];
+    const branch_statuses = {};
+    for (const branch of BRANCHES_ALL) {
+      const bovs = db.prepare(
+        `SELECT override_value, ai_forecast, status FROM branch_overrides WHERE cycle_id=? AND branch=?`
+      ).all(cycleId, branch);
+
+      const hasActivity = bovs.some(o => o.status === 'submitted' || o.status === 'resolved');
+      if (!hasActivity) {
+        branch_statuses[branch] = 'pending';
+      } else {
+        // Only flag as conflict if there are UNRESOLVED (submitted) overrides with >20% deviation
+        const hasConflict = bovs.some(o =>
+          o.status === 'submitted' && o.ai_forecast > 0 &&
+          Math.abs((o.override_value - o.ai_forecast) / o.ai_forecast) > 0.20
+        );
+        branch_statuses[branch] = hasConflict ? 'conflict' : 'submitted_clean';
+      }
+    }
 
     res.json({
-      total_units: total?.total || 0,
-      branches_submitted: submitted?.cnt || 0,
-      conflicts_pending: conflicts?.cnt || 0,
-      cycle_status: cycle?.status || 'unknown',
+      total_units:        total?.total    || 0,
+      branches_submitted: submitted?.cnt  || 0,
+      conflicts_pending:  conflicts?.cnt  || 0,
+      cycle_status:       cycle?.status   || 'unknown',
+      total_branches:     8,
+      branch_statuses,
     });
   } catch (err) {
+    console.error('live-summary error:', err.message);
     res.status(500).json({ error: err.message });
+  } finally {
+    db.close();
   }
 });
 

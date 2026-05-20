@@ -20,8 +20,8 @@ const CatBadge = ({ cat }) => {
   const c = CAT_COLORS[cat] || { bg:'F3F4F6', text:'374151' };
   return <span style={{ background:`#${c.bg}`, color:`#${c.text}`, fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:20, whiteSpace:'nowrap' }}>{cat}</span>;
 };
-const MONTHS_FWD   = ['02-2026','03-2026','04-2026','05-2026','06-2026','07-2026'];
-const MONTH_LABELS = ["Feb'26","Mar'26","Apr'26","May'26","Jun'26","Jul'26"];
+const MONTHS_FWD   = ['06-2026','07-2026','08-2026','09-2026','10-2026','11-2026'];
+const MONTH_LABELS = ["Jun'26","Jul'26","Aug'26","Sep'26","Oct'26","Nov'26"];
 const BRANCHES     = ['Mumbai','New Delhi','Kolkata','Chennai','Bangalore','Hyderabad','Pune','Ahmedabad'];
 
 const CAT_MAP = {

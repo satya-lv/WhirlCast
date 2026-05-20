@@ -36,8 +36,8 @@ const CatBadge = ({ cat }) => {
   return <span style={{ background:`#${c.bg}`, color:`#${c.text}`, fontSize:9, fontWeight:600, padding:'1px 6px', borderRadius:20 }}>{cat}</span>;
 };
 
-const MONTHS_FWD   = ['02-2026','03-2026','04-2026','05-2026','06-2026','07-2026'];
-const MONTH_LABELS = ["Feb'26","Mar'26","Apr'26","May'26","Jun'26","Jul'26"];
+const MONTHS_FWD   = ['06-2026','07-2026','08-2026','09-2026','10-2026','11-2026'];
+const MONTH_LABELS = ["Jun'26","Jul'26","Aug'26","Sep'26","Oct'26","Nov'26"];
 const CAT_MAP = {
   'REF_190L_DirectCool':'Direct Cool Refrigerator', 'REF_240L_FrostFree':'Frost Free Refrigerator',
   'REF_340L_TripleDoor':'Frost Free Refrigerator',  'WM_7KG_TopLoad':'Washing Machine',

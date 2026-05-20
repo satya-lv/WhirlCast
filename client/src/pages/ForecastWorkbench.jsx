@@ -7,7 +7,7 @@ import { PageHeader } from '../components/shared/PageHeader';
 
 const BRANCHES = ['Mumbai','New Delhi','Kolkata','Chennai','Bangalore','Hyderabad','Pune','Ahmedabad'];
 const ALGORITHMS = ['SARIMAX','ARIMA','Exponential Smoothing','Moving Average','Random Forest','XGBoost','Prophet'];
-const MONTHS_FWD = ['Feb\'26','Mar\'26','Apr\'26','May\'26','Jun\'26','Jul\'26'];
+const MONTHS_FWD = ['Jun\'26','Jul\'26','Aug\'26','Sep\'26','Oct\'26','Nov\'26'];
 
 const INTERNAL_CAUSAL = ['Trade Promotions','Pricing Changes','New Launch','Pipeline Changes','Scheme Changes'];
 const EXTERNAL_CAUSAL = ['Festival Calendar','Weather Data','GDP Index','Competitor Activity','Govt Regulations'];

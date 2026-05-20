@@ -24,8 +24,8 @@ const CatBadge = ({ cat }) => {
   return <span style={{ background:`#${c.bg}`, color:`#${c.text}`, fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:20, whiteSpace:'nowrap' }}>{cat}</span>;
 };
 const REASONS  = ['A: Increase in ranging','B: New Promo/Activity','C: Pricing Change','D: Repipeline','E: Seasonality effects','F: Competitor Activity','G: Others'];
-const MONTHS   = ['02-2026','03-2026','04-2026','05-2026','06-2026','07-2026'];
-const MONTH_LABELS = ["Feb'26","Mar'26","Apr'26","May'26","Jun'26","Jul'26"];
+const MONTHS   = ['06-2026','07-2026','08-2026','09-2026','10-2026','11-2026'];
+const MONTH_LABELS = ["Jun'26","Jul'26","Aug'26","Sep'26","Oct'26","Nov'26"];
 
 const CustomTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
@@ -149,7 +149,7 @@ export default function CollaborationSuite() {
     try {
       await fetch('/api/collaboration/override', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ branch: activeBranch, sku, month, value: parseInt(val), reason: reasons[key] || '' }),
+        body: JSON.stringify({ branch: activeBranch, sku, month, override_value: parseInt(val), reason: reasons[key] || '' }),
       });
       toast.success(`Override saved for ${sku}`);
       fetchBranchData(activeBranch);
@@ -284,7 +284,7 @@ export default function CollaborationSuite() {
                     {[
                       ...(showBranchCol ? ['Branch'] : []),
                       'SKU','Category','Last 6M Actual','AI Forecast (6M)',
-                      ...MONTH_LABELS.map(m => `${m} Override`),
+                      ...MONTH_LABELS,
                       ...(showActionsCol ? ['Actions'] : []),
                     ].map(h => (
                       <th key={h} style={{ padding:'10px 12px', fontSize:11, fontWeight:600, color:'#6B7280', textTransform:'uppercase', letterSpacing:'0.04em', borderBottom:'1px solid #E5E7EB', textAlign:'left', whiteSpace:'nowrap' }}>
@@ -323,7 +323,7 @@ export default function CollaborationSuite() {
                             </div>
                           </td>
                           <td style={{ padding:'10px 12px' }}><CatBadge cat={row.category}/></td>
-                          <td style={{ padding:'10px 12px', color:'var(--text-1)' }}>{(row.months[0]?.last_6m_actual || 0).toLocaleString('en-IN')}</td>
+                          <td style={{ padding:'10px 12px', color:'var(--text-1)' }}>{(row.last_6m_actual || row.months[0]?.last_6m_actual || 0).toLocaleString('en-IN')}</td>
                           <td style={{ padding:'10px 12px', fontWeight:600 }}>{aiTotal.toLocaleString('en-IN')}</td>
                           {row.months.map((m, mi) => {
                             const key = `${row.sku}|${m.month}`;

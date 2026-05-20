@@ -19,12 +19,11 @@ const SPARK_UNITS = [88000,92000,89000,95000,98000,102000,99000,105000,108000,11
 const SPARK_ACC   = [91,89,92,88,86,87,88,85,87,86,88,87];
 const SPARK_REV   = [118,122,119,126,130,135,132,138,141,144,146,148];
 
-const ACTIVITY = [
-  { icon: '🔴', text: 'Holly (Kolkata) submitted overrides — 2 conflicts flagged', time: '2h ago' },
-  { icon: '✅', text: 'Scenario 1 finalized by Priya Sharma',                      time: '5h ago' },
-  { icon: '🟡', text: '6 exceptions detected — 4 acknowledged',                    time: '1d ago' },
-  { icon: '✦',  text: 'Demand Sensing applied: Q2_Promo_Brief.pdf',                time: '1d ago' },
-  { icon: '✅', text: 'Forecast generated for May 2026 cycle',                     time: '1d ago' },
+const STATIC_ACTIVITY = [
+  { icon: '✅', text: 'Scenario 1 finalized by Priya Sharma',       time: '5h ago' },
+  { icon: '🟡', text: '6 exceptions detected — 4 acknowledged',     time: '1d ago' },
+  { icon: '✦',  text: 'Demand Sensing applied: Q2_Promo_Brief.pdf', time: '1d ago' },
+  { icon: '✅', text: 'Forecast generated for May 2026 cycle',       time: '1d ago' },
 ];
 
 
@@ -62,6 +61,9 @@ export default function Dashboard() {
         .then(r => r.json())
         .then(d => {
           setLiveSummary(d);
+          if (d.branch_statuses) {
+            setLiveBranches(Object.entries(d.branch_statuses).map(([name, status]) => ({ name, status })));
+          }
           const activeIdx =
             d.cycle_status === 'signed_off' ? 5 :
             d.cycle_status === 'resolved' || d.cycle_status === 'closed' ? 4 :
@@ -72,10 +74,10 @@ export default function Dashboard() {
             sub: i === 3 ? `${d.branches_submitted} of 8 submitted` : s.sub,
           })));
         })
-        .catch(() => {});
+        .catch(err => console.error('live-summary fetch failed:', err));
     };
     fetchLive();
-    const id = setInterval(fetchLive, 15000);
+    const id = setInterval(fetchLive, 5000);
     return () => clearInterval(id);
   }, []);
 
@@ -101,16 +103,32 @@ export default function Dashboard() {
             Good morning, {user?.name?.split(' ')[0]} 👋
           </h2>
           <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.45)', margin: 0 }}>
-            May 2026 Forecast Cycle · 5 branches haven't submitted overrides yet · Deadline in 5 days
+            May 2026 Forecast Cycle ·{' '}
+            {(() => {
+              const submitted = liveSummary?.branches_submitted ?? kpis?.pendingBranches != null ? (8 - kpis.pendingBranches) : null;
+              if (submitted === null) return '…loading';
+              const pending = 8 - submitted;
+              if (pending === 0) return 'All branches have submitted overrides';
+              return `${pending} ${pending === 1 ? "branch hasn't" : "branches haven't"} submitted overrides yet`;
+            })()}
+            {' '}· Deadline in 5 days
           </p>
         </div>
         <div style={{ background: 'rgba(255,255,255,0.08)', borderRadius: 12, padding: '14px 20px', textAlign: 'right' }}>
           <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginBottom: 8 }}>Your next action</div>
-          <button onClick={() => navigate('/collaboration')}
-            style={{ background: '#E31837', color: 'white', border: 'none', borderRadius: 8,
-              padding: '8px 18px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
-            → Go to Collaboration Suite
-          </button>
+          {(() => {
+            const hasConflicts = liveSummary?.conflicts_pending > 0;
+            const allSubmitted = liveSummary?.branches_submitted === 8;
+            const label = hasConflicts || allSubmitted ? '→ Resolve Conflicts' : '→ Go to Collaboration Suite';
+            const path  = hasConflicts || allSubmitted ? '/conflicts' : '/collaboration';
+            return (
+              <button onClick={() => navigate(path)}
+                style={{ background: '#E31837', color: 'white', border: 'none', borderRadius: 8,
+                  padding: '8px 18px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                {label}
+              </button>
+            );
+          })()}
         </div>
       </div>
 
@@ -232,16 +250,30 @@ export default function Dashboard() {
               <div style={{ width:7, height:7, borderRadius:'50%', background:'#22C55E',
                 boxShadow:'0 0 6px #22C55E' }}/>
             </div>
-            {ACTIVITY.map((a, i) => (
-              <div key={i} style={{ display:'flex', gap:10, padding:'8px 0',
-                borderBottom: i < ACTIVITY.length - 1 ? '0.5px solid var(--border)' : 'none' }}>
-                <span style={{ fontSize:14, flexShrink:0 }}>{a.icon}</span>
-                <div style={{ flex:1 }}>
-                  <div style={{ fontSize:12, color:'var(--text-1)', lineHeight:1.4 }}>{a.text}</div>
-                  <div style={{ fontSize:10, color:'var(--text-3)', marginTop:2 }}>{a.time}</div>
+            {(() => {
+              const liveItems = liveSummary?.branch_statuses
+                ? Object.entries(liveSummary.branch_statuses)
+                    .filter(([, s]) => s !== 'pending')
+                    .map(([branch, status]) => ({
+                      icon: status === 'conflict' ? '🔴' : '✅',
+                      text: status === 'conflict'
+                        ? `${branch} submitted overrides — conflict flagged`
+                        : `${branch} submitted overrides — clean`,
+                      time: 'today',
+                    }))
+                : [];
+              const allItems = [...liveItems, ...STATIC_ACTIVITY].slice(0, 6);
+              return allItems.map((a, i) => (
+                <div key={i} style={{ display:'flex', gap:10, padding:'8px 0',
+                  borderBottom: i < allItems.length - 1 ? '0.5px solid var(--border)' : 'none' }}>
+                  <span style={{ fontSize:14, flexShrink:0 }}>{a.icon}</span>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontSize:12, color:'var(--text-1)', lineHeight:1.4 }}>{a.text}</div>
+                    <div style={{ fontSize:10, color:'var(--text-3)', marginTop:2 }}>{a.time}</div>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ));
+            })()}
           </div>
           <div style={{ background:'var(--card)', borderRadius:16, padding:'18px 20px',
             boxShadow:'var(--shadow-sm)' }}>

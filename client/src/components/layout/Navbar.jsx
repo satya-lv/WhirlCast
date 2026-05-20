@@ -49,7 +49,7 @@ export default function Navbar() {
     setResetting(true);
     setShowResetModal(false);
     try {
-      const res = await fetch('http://localhost:3001/api/demo/reset', { method: 'POST' });
+      const res = await fetch('/api/demo/reset', { method: 'POST' });
       const data = await res.json();
       if (data.success) {
         alert('Demo reset — ready for walkthrough');
