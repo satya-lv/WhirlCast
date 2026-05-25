@@ -142,6 +142,15 @@ export default function ForecastWorkbench() {
         subtitle="Configure algorithms and generate demand forecasts for May 2026"
         helpText="Select which variables and algorithms to use, then click Generate. Review exceptions before they corrupt the forecast. Save your output as a named scenario."/>
 
+      <div style={{ background:'var(--blue-bg,#EFF6FF)', border:'0.5px solid #BFDBFE', borderRadius:10, padding:'10px 16px', marginBottom:16, fontSize:12, color:'#1D4ED8', display:'flex', alignItems:'center', gap:10 }}>
+        <span style={{ fontSize:16 }}>📍</span>
+        <div>
+          <span style={{ fontWeight:700 }}>Forecast Granularity: Branch × SKU Level</span>
+          <span style={{ color:'#3B82F6', marginLeft:8 }}>· 6-month forward horizon (Jun 2026 – Nov 2026)</span>
+          <span style={{ color:'#6B7280', marginLeft:8 }}>· 8 branches · 10 SKUs · 480 data points</span>
+        </div>
+      </div>
+
       <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 20, alignItems: 'start' }}>
         {/* LEFT: Config Panel */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -359,7 +368,10 @@ export default function ForecastWorkbench() {
               {/* Output */}
               <div style={{ background: 'var(--card)', borderRadius: 'var(--radius-md)', padding: '20px', boxShadow: 'var(--shadow-sm)', border: '0.5px solid var(--border)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-                  <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Forecast Output</h3>
+                  <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                    <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Forecast Output</h3>
+                    <span style={{ fontSize:11, background:'#F0F4F8', color:'var(--text-2)', padding:'3px 10px', borderRadius:20 }}>Branch × SKU · Jun–Nov 2026</span>
+                  </div>
                   <div style={{ display: 'flex', gap: 4, background: '#F4F6FA', borderRadius: 8, padding: 3 }}>
                     {[{id:'chart', label:'📈 Chart'},{id:'table', label:'📋 Table'}].map(tab => (
                       <button key={tab.id} onClick={() => setView(tab.id)} style={{

@@ -19,7 +19,11 @@ import AdminConsole from './pages/AdminConsole';
 function ProtectedRoute({ children, allowedRoles }) {
   const { user, isAuthenticated } = useAuth();
   if (!isAuthenticated) return <Navigate to="/login" replace />;
-  if (allowedRoles && !allowedRoles.includes(user.role)) return <Navigate to="/login" replace />;
+  if (allowedRoles && !allowedRoles.includes(user.role)) {
+    if (user.role === 'branch_sales') return <Navigate to="/collaboration" replace />;
+    if (user.role === 'category_team') return <Navigate to="/conflicts" replace />;
+    return <Navigate to="/login" replace />;
+  }
   return children;
 }
 

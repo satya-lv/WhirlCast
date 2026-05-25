@@ -16,7 +16,6 @@ const navConfig = {
   ],
   branch_sales:  [
     { path: '/collaboration',  label: 'My Forecast', icon: '💬' },
-    { path: '/demand-sensing', label: '✦ Sensing',   icon: '✦'  },
     { path: '/report',         label: 'Report',      icon: '📄' },
   ],
   category_team: [
@@ -52,7 +51,7 @@ export default function Navbar() {
       const res = await fetch('/api/demo/reset', { method: 'POST' });
       const data = await res.json();
       if (data.success) {
-        alert('Demo reset — ready for walkthrough');
+        alert(data.message || 'Demo reset to default state');
         setTimeout(() => window.location.reload(), 1500);
       }
     } catch {

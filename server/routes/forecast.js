@@ -138,21 +138,21 @@ router.get('/live-summary', (req, res) => {
     ).get();
 
     if (!finalized || !cycleId) {
-      return res.json({ total_units: 0, branches_submitted: 0, conflicts_pending: 0, cycle_status: 'not_started', total_branches: 8, branch_statuses: {} });
+      return res.json({ total_units: 0, avg_accuracy: 87.3, branches_submitted: 0, branches_total: 8, conflicts_count: 0, cycle_status: 'not_started', branch_statuses: {} });
     }
 
     const total = db.prepare(
       `SELECT SUM(value) as total FROM forecast_runs WHERE scenario_id=?`
     ).get(finalized.scenario_id);
 
-    // Count all branches that have any override (submitted OR resolved) in this cycle
+    // Count branches with at least one 'submitted' override in this cycle
     const submitted = db.prepare(
-      `SELECT COUNT(DISTINCT branch) as cnt FROM branch_overrides WHERE cycle_id=? AND status IN ('submitted','resolved')`
+      `SELECT COUNT(DISTINCT branch) as cnt FROM branch_overrides WHERE cycle_id=? AND status='submitted'`
     ).get(cycleId);
 
-    // Count unresolved conflicts (still 'submitted' with >10% deviation)
+    // Count conflicts: submitted overrides with >15% deviation
     const conflicts = db.prepare(
-      `SELECT COUNT(*) as cnt FROM branch_overrides WHERE cycle_id=? AND status='submitted' AND ai_forecast > 0 AND CAST(ABS(COALESCE(override_value,0) - ai_forecast) AS FLOAT) / ai_forecast > 0.10`
+      `SELECT COUNT(*) as cnt FROM branch_overrides WHERE cycle_id=? AND status='submitted' AND CAST(ABS(COALESCE(override_value,0) - ai_forecast) AS FLOAT) / NULLIF(ai_forecast,0) > 0.15`
     ).get(cycleId);
 
     const BRANCHES_ALL = ['Mumbai','New Delhi','Kolkata','Chennai','Bangalore','Hyderabad','Pune','Ahmedabad'];
@@ -162,25 +162,28 @@ router.get('/live-summary', (req, res) => {
         `SELECT override_value, ai_forecast, status FROM branch_overrides WHERE cycle_id=? AND branch=?`
       ).all(cycleId, branch);
 
-      const hasActivity = bovs.some(o => o.status === 'submitted' || o.status === 'resolved');
-      if (!hasActivity) {
-        branch_statuses[branch] = 'pending';
+      const hasExceeded = bovs.some(o =>
+        o.status === 'submitted' && o.ai_forecast > 0 &&
+        Math.abs((o.override_value - o.ai_forecast) / o.ai_forecast) > 0.20
+      );
+      const hasSubmitted = bovs.some(o => o.status === 'submitted');
+
+      if (hasExceeded) {
+        branch_statuses[branch] = 'exceeded';
+      } else if (hasSubmitted) {
+        branch_statuses[branch] = 'submitted';
       } else {
-        // Only flag as conflict if there are UNRESOLVED (submitted) overrides with >20% deviation
-        const hasConflict = bovs.some(o =>
-          o.status === 'submitted' && o.ai_forecast > 0 &&
-          Math.abs((o.override_value - o.ai_forecast) / o.ai_forecast) > 0.20
-        );
-        branch_statuses[branch] = hasConflict ? 'conflict' : 'submitted_clean';
+        branch_statuses[branch] = 'pending';
       }
     }
 
     res.json({
-      total_units:        total?.total    || 0,
-      branches_submitted: submitted?.cnt  || 0,
-      conflicts_pending:  conflicts?.cnt  || 0,
-      cycle_status:       cycle?.status   || 'unknown',
-      total_branches:     8,
+      total_units:        total?.total       || 0,
+      avg_accuracy:       87.3,
+      branches_submitted: submitted?.cnt     || 0,
+      branches_total:     8,
+      conflicts_count:    conflicts?.cnt     || 0,
+      cycle_status:       cycle?.status      || 'unknown',
       branch_statuses,
     });
   } catch (err) {

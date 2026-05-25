@@ -9,8 +9,8 @@ import { useIsMobile } from '../utils/useIsMobile';
 
 const DEFAULT_STEPS = [
   { label: 'Forecast Generated', sub: '14 May',           status: 'done' },
-  { label: 'Scenarios Compared', sub: '14 May',           status: 'done' },
-  { label: 'Scenario Finalized', sub: 'Baseline SARIMAX', status: 'done' },
+  { label: 'Forecast Compared',  sub: '14 May',           status: 'done' },
+  { label: 'Forecast Finalized', sub: 'Baseline SARIMAX', status: 'done' },
   { label: 'Branch Overrides',   sub: '3 of 8 submitted', status: 'current' },
   { label: 'Sign-off',           sub: 'Locked',           status: 'pending' },
 ];
@@ -117,7 +117,7 @@ export default function Dashboard() {
         <div style={{ background: 'rgba(255,255,255,0.08)', borderRadius: 12, padding: '14px 20px', textAlign: 'right' }}>
           <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginBottom: 8 }}>Your next action</div>
           {(() => {
-            const hasConflicts = liveSummary?.conflicts_pending > 0;
+            const hasConflicts = liveSummary?.conflicts_count > 0;
             const allSubmitted = liveSummary?.branches_submitted === 8;
             const label = hasConflicts || allSubmitted ? '→ Resolve Conflicts' : '→ Go to Collaboration Suite';
             const path  = hasConflicts || allSubmitted ? '/conflicts' : '/collaboration';
@@ -175,10 +175,10 @@ export default function Dashboard() {
 
       {/* KPI Cards */}
       <div className="fade-up-2" style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : 'repeat(4,1fr)', gap: 12, marginBottom: 16 }}>
-        <KPICard label="Forecasted Units"      value={liveSummary ? toIndianNumber(liveSummary.total_units) : kpis ? toIndianNumber(kpis.totalUnits) : '1,24,850'} badge="↑ 8.2% vs last cycle" badgeType="up" spark={SPARK_UNITS} accentColor="var(--navy-accent)" icon="📦"/>
-        <KPICard label="Avg Forecast Accuracy" value={kpis ? `${kpis.accuracy}%` : '87.3%'}                   badge="↓ 1.2% · Target 90%"  badgeType="down" spark={SPARK_ACC}   accentColor="#D97706"            icon="🎯"/>
-        <KPICard label="Pending Overrides"     value={liveSummary ? `${8 - liveSummary.branches_submitted} branches` : kpis ? `${kpis.pendingBranches} branches` : '5 branches'} badge={liveSummary ? `${liveSummary.conflicts_pending} conflicts` : 'Due 20-May-2026'} badgeType="warn" accentColor="#F59E0B" icon="⏳"/>
-        <KPICard label="Predicted Revenue"     value="₹148.2 Cr"                                               badge="↑ 11.4% vs last cycle" badgeType="up"   spark={SPARK_REV}  accentColor="var(--red)"         icon="₹"/>
+        <KPICard label="Forecasted Units"      subtitle="Branch × SKU level · 6-month horizon" value={liveSummary ? toIndianNumber(liveSummary.total_units) : kpis ? toIndianNumber(kpis.totalUnits) : '1,24,850'} badge="↑ 8.2% vs last cycle" badgeType="up" spark={SPARK_UNITS} accentColor="var(--navy-accent)" icon="📦"/>
+        <KPICard label="Avg Forecast Accuracy" subtitle="Based on last 3 cycles · MAPE method" value={liveSummary ? `${liveSummary.avg_accuracy}%` : kpis ? `${kpis.accuracy}%` : '87.3%'} badge="↓ 1.2% · Target 90%" badgeType="down" spark={SPARK_ACC} accentColor="#D97706" icon="🎯"/>
+        <KPICard label="Pending Overrides"     value={liveSummary ? `${liveSummary.branches_total - liveSummary.branches_submitted} branches` : kpis ? `${kpis.pendingBranches} branches` : '5 branches'} badge={liveSummary ? `${liveSummary.branches_submitted} of 8 submitted` : 'Due 20-May-2026'} badgeType="warn" accentColor="#F59E0B" icon="⏳"/>
+        <KPICard label="Unresolved Conflicts"  value={liveSummary ? `${liveSummary.conflicts_count}` : '1'}    badge={liveSummary ? (liveSummary.conflicts_count === 0 ? 'All clear' : `${liveSummary.conflicts_count} flagged`) : 'Loading...'} badgeType={liveSummary?.conflicts_count === 0 ? 'up' : 'warn'} accentColor="#EF4444" icon="⚠️"/>
       </div>
 
       {/* Map + Activity */}
@@ -203,8 +203,8 @@ export default function Dashboard() {
                 {name:'New Delhi',status:'pending'},{name:'Kolkata',status:'pending'},
                 {name:'Chennai',status:'pending'},{name:'Ahmedabad',status:'pending'},
               ]).map(({ name, status }) => {
-                const sc = { clean:'#22C55E', submitted_clean:'#22C55E', conflict:'#F59E0B', submitted_conflict:'#F59E0B', exceeded:'#EF4444', submitted_exceeded:'#EF4444', pending:'#6B7280' };
-                const sl = { clean:'Submitted', submitted_clean:'Submitted', conflict:'Conflict', submitted_conflict:'Conflict', exceeded:'Exceeded', submitted_exceeded:'Exceeded', pending:'Pending' };
+                const sc = { submitted:'#F59E0B', exceeded:'#EF4444', pending:'#6B7280', clean:'#22C55E', submitted_clean:'#22C55E', conflict:'#F59E0B', submitted_conflict:'#F59E0B', submitted_exceeded:'#EF4444' };
+                const sl = { submitted:'Submitted', exceeded:'Exceeded', pending:'Pending', clean:'Submitted', submitted_clean:'Submitted', conflict:'Conflict', submitted_conflict:'Conflict', submitted_exceeded:'Exceeded' };
                 const color = sc[status] || '#6B7280';
                 const label = sl[status] || 'Pending';
                 return (
@@ -225,15 +225,15 @@ export default function Dashboard() {
                   </div>
                 );
               })}
-              {liveBranches.length > 0 && (() => {
-                const submitted = liveBranches.filter(b => b.status !== 'pending').length;
-                const conflicts = liveBranches.filter(b => b.status === 'submitted_conflict' || b.status === 'conflict').length;
-                const pending   = liveBranches.filter(b => b.status === 'pending').length;
+              {liveSummary && (() => {
+                const submitted = liveSummary.branches_submitted;
+                const pending   = liveSummary.branches_total - liveSummary.branches_submitted;
+                const conflicts = liveSummary.conflicts_count;
                 return (
                   <div style={{ display:'flex', gap:8, marginTop:14, flexWrap:'wrap' }}>
                     {submitted > 0 && <span style={{ fontSize:10, padding:'3px 9px', borderRadius:20, background:'rgba(255,255,255,0.07)', color:'rgba(255,255,255,0.55)' }}>{submitted} submitted</span>}
                     {pending > 0   && <span style={{ fontSize:10, padding:'3px 9px', borderRadius:20, background:'rgba(255,255,255,0.07)', color:'rgba(255,255,255,0.55)' }}>{pending} pending</span>}
-                    {conflicts > 0 && <span style={{ fontSize:10, padding:'3px 9px', borderRadius:20, background:'rgba(255,255,255,0.07)', color:'rgba(255,255,255,0.55)' }}>{conflicts} conflict</span>}
+                    {conflicts > 0 && <span style={{ fontSize:10, padding:'3px 9px', borderRadius:20, background:'rgba(255,255,255,0.07)', color:'rgba(255,255,255,0.55)' }}>{conflicts} conflicts</span>}
                   </div>
                 );
               })()}
@@ -279,7 +279,7 @@ export default function Dashboard() {
             boxShadow:'var(--shadow-sm)' }}>
             <div style={{ fontSize:13, fontWeight:700, color:'var(--text-1)', marginBottom:12 }}>Quick Actions</div>
             {[
-              { label:'→ Collaboration Suite',      path:'/collaboration',  color:'var(--navy-accent)', outline:false },
+              { label:'⚡ Generate Forecast',        path:'/workbench',      color:'var(--navy-accent)', outline:false },
               { label:'↗ View Forecasting Report',  path:'/report',         color:'transparent',        outline:true  },
               { label:'✦ Run Demand Sensing',        path:'/demand-sensing', color:'#7C3AED',            outline:false },
             ].map(btn => (

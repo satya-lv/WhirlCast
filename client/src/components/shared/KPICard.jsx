@@ -1,7 +1,7 @@
 import React from 'react';
 import { LineChart, Line, ResponsiveContainer } from 'recharts';
 
-export const KPICard = ({ label, value, badge, badgeType, spark, accentColor, icon, animClass,
+export const KPICard = ({ label, value, badge, badgeType, spark, accentColor, icon, animClass, subtitle,
   /* legacy props for backward compat */ title, trend, trendDirection, sparklineData, borderColor, sub }) => {
   const displayLabel = label || title;
   const displayBadge = badge || trend;
@@ -22,9 +22,9 @@ export const KPICard = ({ label, value, badge, badgeType, spark, accentColor, ic
       onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = 'var(--shadow-md)'; }}
       onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'var(--shadow-sm)'; }}>
       <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.8px', textTransform: 'uppercase',
-        color: 'var(--text-2)', marginBottom: 6 }}>{displayLabel}</div>
+        color: 'var(--text-2)', marginBottom: 2 }}>{displayLabel}</div>
+      {(subtitle || sub) && <div style={{ fontSize: 10, color: 'var(--text-3)', marginBottom: 4 }}>{subtitle || sub}</div>}
       <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--text-1)', lineHeight: 1, marginBottom: 8 }}>{value}</div>
-      {sub && <div style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 4 }}>{sub}</div>}
       {displayBadge && (
         <span style={{
           fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 20,

@@ -168,6 +168,13 @@ export default function ForecastSelection() {
 
           {comparison && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {/* Granularity info row */}
+              <div style={{ display:'flex', justifyContent:'flex-end', alignItems:'center', gap:12, marginBottom:12 }}>
+                <span style={{ fontSize:11, color:'var(--text-3)' }}>Comparing at:</span>
+                <span style={{ fontSize:11, fontWeight:600, background:'#EFF3FF', color:'#1B3A6B', padding:'4px 12px', borderRadius:20 }}>📍 Branch × SKU Level</span>
+                <span style={{ fontSize:11, fontWeight:600, background:'#F0FDF4', color:'#166534', padding:'4px 12px', borderRadius:20 }}>📅 Jun 2026 – Nov 2026</span>
+                <span style={{ fontSize:11, fontWeight:600, background:'#FEF3C7', color:'#92400E', padding:'4px 12px', borderRadius:20 }}>🏭 480 SKU-Branch combinations</span>
+              </div>
               {/* Winner cards */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
                 {[

@@ -15,11 +15,12 @@ const DEFAULT_CITIES = [
 ];
 
 const COLORS = {
+  submitted:          '#F59E0B',
+  exceeded:           '#EF4444',
   clean:              '#22C55E',
   submitted_clean:    '#22C55E',
   conflict:           '#F59E0B',
   submitted_conflict: '#F59E0B',
-  exceeded:           '#EF4444',
   submitted_exceeded: '#EF4444',
   warning:            '#F97316',
   pending:            '#4B5563',
@@ -27,11 +28,12 @@ const COLORS = {
 };
 
 const LABELS = {
+  submitted:          'Submitted',
+  exceeded:           'Exceeded',
   clean:              'Submitted',
   submitted_clean:    'Submitted',
   conflict:           'Conflict',
   submitted_conflict: 'Conflict',
-  exceeded:           'Exceeded',
   submitted_exceeded: 'Exceeded',
   warning:            'Watch',
   pending:            'Pending',
