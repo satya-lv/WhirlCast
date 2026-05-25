@@ -17,7 +17,6 @@ const DEFAULT_STEPS = [
 
 const SPARK_UNITS = [88000,92000,89000,95000,98000,102000,99000,105000,108000,112000,118000,124850];
 const SPARK_ACC   = [91,89,92,88,86,87,88,85,87,86,88,87];
-const SPARK_REV   = [118,122,119,126,130,135,132,138,141,144,146,148];
 
 const STATIC_ACTIVITY = [
   { icon: '✅', text: 'Scenario 1 finalized by Priya Sharma',       time: '5h ago' },
