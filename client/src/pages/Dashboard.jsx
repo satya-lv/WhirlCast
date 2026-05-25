@@ -104,7 +104,7 @@ export default function Dashboard() {
           <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.45)', margin: 0 }}>
             May 2026 Forecast Cycle ·{' '}
             {(() => {
-              const submitted = liveSummary?.branches_submitted ?? kpis?.pendingBranches != null ? (8 - kpis.pendingBranches) : null;
+              const submitted = liveSummary?.branches_submitted ?? (kpis != null ? (8 - kpis.pendingBranches) : null);
               if (submitted === null) return '…loading';
               const pending = 8 - submitted;
               if (pending === 0) return 'All branches have submitted overrides';

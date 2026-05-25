@@ -92,8 +92,8 @@ router.get('/', (req, res) => {
       activity,
       cycleSteps: [
         { label: 'Forecast Generated', status: 'done', date: '14-May', note: '' },
-        { label: 'Scenarios Compared', status: 'done', date: '14-May', note: '' },
-        { label: 'Scenario Finalized', status: 'done', date: '', note: 'Baseline SARIMAX' },
+        { label: 'Forecast Compared',  status: 'done', date: '14-May', note: '' },
+        { label: 'Forecast Finalized', status: 'done', date: '', note: 'Baseline SARIMAX' },
         { label: 'Branch Overrides', status: 'active', date: '', note: `${submittedBranches.length} of 8 submitted` },
         { label: 'Sign-off', status: 'pending', date: '', note: '' },
       ],
