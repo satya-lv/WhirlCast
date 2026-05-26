@@ -211,16 +211,6 @@ export default function CollaborationSuite() {
         </div>
       )}
 
-      {/* Alert banner */}
-      <div style={{ background:'#FFFBEB', border:'1px solid #FCD34D', borderRadius:10, padding:'12px 16px', marginBottom:20, display:'flex', alignItems:'center', gap:10 }}>
-        <span style={{ fontSize:16 }}>📋</span>
-        <span style={{ fontSize:13, color:'#92400E', flex:1 }}>
-          Finalized forecast for May 2026 cycle is ready for review. Please submit your overrides by 20-May-2026.
-        </span>
-        <span style={{ background:'#D97706', color:'white', borderRadius:12, padding:'3px 10px', fontSize:11, fontWeight:600, whiteSpace:'nowrap' }}>
-          5 days remaining
-        </span>
-      </div>
 
       {/* Map + Table */}
       <div style={{ display:'flex', flexDirection: isMobile ? 'column' : 'row', gap:16, alignItems:'flex-start' }}>

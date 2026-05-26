@@ -113,22 +113,6 @@ export default function Dashboard() {
             {' '}· Deadline in 5 days
           </p>
         </div>
-        <div style={{ background: 'rgba(255,255,255,0.08)', borderRadius: 12, padding: '14px 20px', textAlign: 'right' }}>
-          <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginBottom: 8 }}>Your next action</div>
-          {(() => {
-            const hasConflicts = liveSummary?.conflicts_count > 0;
-            const allSubmitted = liveSummary?.branches_submitted === 8;
-            const label = hasConflicts || allSubmitted ? '→ Resolve Conflicts' : '→ Go to Collaboration Suite';
-            const path  = hasConflicts || allSubmitted ? '/conflicts' : '/collaboration';
-            return (
-              <button onClick={() => navigate(path)}
-                style={{ background: '#E31837', color: 'white', border: 'none', borderRadius: 8,
-                  padding: '8px 18px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
-                {label}
-              </button>
-            );
-          })()}
-        </div>
       </div>
 
       {/* Cycle Stepper */}
