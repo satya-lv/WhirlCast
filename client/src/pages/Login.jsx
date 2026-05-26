@@ -31,7 +31,7 @@ const roles = [
     title: 'Category Team',
     subtitle: 'Anjali Singh',
     desc: 'Review national category totals, resolve override conflicts and ensure the India-level plan is coherent.',
-    icon: '🗂',
+    icon: '📂',
     color: '#A855F7',
     bg: 'rgba(168,85,247,0.15)',
     border: 'rgba(168,85,247,0.3)',
