@@ -264,6 +264,7 @@ export default function ForecastSelection() {
                   {sc.slice(0, 2).map((s, si) => (
                     <div key={s.scenario_id}>
                       <div style={{ fontSize: 12, fontWeight: 600, color: LINE_COLORS[si], marginBottom: 8 }}>{s.name}</div>
+                      <div style={{ overflowX: 'auto', width: '100%' }}>
                       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
                         <thead>
                           <tr style={{ background: '#F8FAFF' }}>
@@ -283,6 +284,7 @@ export default function ForecastSelection() {
                           })}
                         </tbody>
                       </table>
+                      </div>
                     </div>
                   ))}
                 </div>

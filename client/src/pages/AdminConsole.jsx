@@ -161,6 +161,7 @@ export default function AdminConsole() {
             </div>
             <p style={{ margin: 0, fontSize: 12, color: '#6B7280' }}>Map discontinued SKUs to their successor products for accurate forecast comparison</p>
           </div>
+          <div style={{ overflowX: 'auto', width: '100%' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
               <tr style={{ background: '#F8FAFF' }}>
@@ -185,6 +186,7 @@ export default function AdminConsole() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
@@ -195,6 +197,7 @@ export default function AdminConsole() {
             <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>User Management ({users.length} users)</h3>
             <button onClick={() => setShowAddUser(true)} style={primaryBtn}><Plus size={13} /> Add User</button>
           </div>
+          <div style={{ overflowX: 'auto', width: '100%' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
               <tr style={{ background: '#F8FAFF' }}>
@@ -240,6 +243,7 @@ export default function AdminConsole() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 

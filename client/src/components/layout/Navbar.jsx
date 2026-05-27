@@ -61,7 +61,7 @@ export default function Navbar() {
   };
 
   useEffect(() => {
-    const saved = localStorage.getItem('demandiq-theme') || 'light';
+    const saved = localStorage.getItem('whirlcast-theme') || 'light';
     setDark(saved === 'dark');
     document.documentElement.setAttribute('data-theme', saved);
   }, []);
@@ -71,7 +71,7 @@ export default function Navbar() {
     setDark(next);
     const theme = next ? 'dark' : 'light';
     document.documentElement.setAttribute('data-theme', theme);
-    localStorage.setItem('demandiq-theme', theme);
+    localStorage.setItem('whirlcast-theme', theme);
   };
 
   if (!user) return null;
@@ -96,7 +96,7 @@ export default function Navbar() {
               strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
           <div>
-            <div style={{ fontSize: 14, fontWeight: 800, color: 'white', lineHeight: 1 }}>DemandIQ</div>
+            <div style={{ fontSize: 14, fontWeight: 800, color: 'white', lineHeight: 1 }}>WhirlCast</div>
             <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.35)', lineHeight: 1 }}>Whirlpool India</div>
           </div>
         </div>

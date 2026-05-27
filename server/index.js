@@ -22,7 +22,7 @@ app.use('/api/admin', require('./routes/admin'));
 app.use('/api/demo',  require('./routes/demo'));
 app.use('/api/cycles', require('./routes/cycles'));
 
-app.get('/api/health', (req, res) => res.json({ status: 'ok', app: 'DemandIQ', version: '1.0.0' }));
+app.get('/api/health', (req, res) => res.json({ status: 'ok', app: 'WhirlCast', version: '1.0.0' }));
 
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, '../client/build')));
@@ -30,5 +30,5 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 app.listen(PORT, () => {
-  console.log(`DemandIQ API running on http://localhost:${PORT}`);
+  console.log(`WhirlCast API running on http://localhost:${PORT}`);
 });

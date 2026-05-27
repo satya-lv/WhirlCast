@@ -1,7 +1,7 @@
 {
-  "name": "demandiq-server",
+  "name": "whirlcast-server",
   "version": "1.0.0",
-  "description": "DemandIQ Backend — Whirlpool India Demand Planning",
+  "description": "WhirlCast Backend — Whirlpool India Demand Planning",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",

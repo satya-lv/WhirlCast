@@ -108,7 +108,7 @@ export default function ForecastingReport() {
       const blob = new Blob([csv], { type:'text/csv' });
       const url  = URL.createObjectURL(blob);
       const a = document.createElement('a'); a.href = url;
-      a.download = 'DemandIQ_Forecast_May2026.csv'; a.click();
+      a.download = 'WhirlCast_Forecast_Jun2026.csv'; a.click();
       toast.success('CSV downloaded');
     } catch { toast.error('Export failed'); }
   };

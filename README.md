@@ -1,4 +1,4 @@
-# DemandIQ — Whirlpool India Demand Planning
+# WhirlCast — Whirlpool India Demand Planning
 
 > Enterprise-grade demand planning tool built for Whirlpool India. Powered by DecisionPoint Analytics.
 
@@ -145,4 +145,4 @@ demandiq/
 
 ---
 
-*DemandIQ v1.0 | Whirlpool India | Powered by DecisionPoint Analytics*
+*WhirlCast v1.0 | Whirlpool India | Powered by DecisionPoint Analytics*

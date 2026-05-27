@@ -7,7 +7,7 @@ import { PageHeader } from '../components/shared/PageHeader';
 
 const IMPACT_COLORS = { high: '#DC2626', medium: '#D97706', low: '#16A34A' };
 const IMPACT_BG = { high: '#FEF2F2', medium: '#FFFBEB', low: '#F0FDF4' };
-const MONTHS = ['Feb\'26','Mar\'26','Apr\'26','May\'26','Jun\'26','Jul\'26'];
+const MONTHS = ['Jun\'26','Jul\'26','Aug\'26','Sep\'26','Oct\'26','Nov\'26'];
 
 const SAMPLE_INSIGHTS = [
   {
@@ -35,7 +35,7 @@ const SAMPLE_INSIGHTS = [
     confidence: 72,
   },
   {
-    insight_text: 'Digital-first awareness drive for Microwave across all urban branches noted in the brief. Expected modest pull-forward of ~7% in May–June.',
+    insight_text: 'Digital-first awareness drive for Microwave across all urban branches noted in the brief. Expected modest pull-forward of ~7% in June–July.',
     impact_level: 'low',
     affected_skus: ['MW_25L_Convection'],
     affected_branches: ['Mumbai', 'New Delhi', 'Bangalore', 'Chennai', 'Kolkata', 'Hyderabad', 'Pune', 'Ahmedabad'],
@@ -112,7 +112,7 @@ export default function DemandSensing() {
         (ins.affected_branches || [])
           .filter(branch => !isBranchSales || branch === user.branch)
           .forEach(branch => {
-            ['02-2026','03-2026','04-2026','05-2026','06-2026','07-2026'].forEach(month => {
+            ['06-2026','07-2026','08-2026','09-2026','10-2026','11-2026'].forEach(month => {
               adjustments.push({ sku, branch, month, adjustment_percent: pct });
             });
           });
@@ -423,7 +423,7 @@ export default function DemandSensing() {
                 <FileText size={16} color="#1B3A6B" />
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 12, fontWeight: 600 }}>Q2_Trade_Promo_Brief.pdf</div>
-                  <div style={{ fontSize: 11, color: '#9CA3AF' }}>20 May · 4 insights · Demo sample</div>
+                  <div style={{ fontSize: 11, color: '#9CA3AF' }}>20 Jun · 4 insights · Demo sample</div>
                 </div>
                 <button onClick={handleSampleClick} style={{
                   background: '#1B3A6B', color: 'white', border: 'none', borderRadius: 8,

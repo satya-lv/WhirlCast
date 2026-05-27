@@ -111,7 +111,7 @@ router.post('/export', (req, res) => {
     const rows = runs.map(r => `${r.branch},${r.sku},${r.category},${r.month},${r.value}`).join('\n');
     db.close();
     res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', `attachment; filename="DemandIQ_Forecast_May2026.csv"`);
+    res.setHeader('Content-Disposition', `attachment; filename="WhirlCast_Forecast_Jun2026.csv"`);
     res.send(header + rows);
   } catch (err) {
     res.status(500).json({ error: err.message });

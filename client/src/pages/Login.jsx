@@ -132,7 +132,7 @@ export default function Login() {
             strokeLinecap="round" strokeLinejoin="round"/>
         </svg>
         <div style={{ fontSize: 32, fontWeight: 800, color: 'white', letterSpacing: '-0.5px' }}>
-          DemandIQ
+          WhirlCast
         </div>
       </div>
       <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 14, marginBottom: 48 }}>
