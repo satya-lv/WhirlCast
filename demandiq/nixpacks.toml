@@ -1,0 +1,11 @@
+[phases.setup]
+nixPkgs = ["python3", "gcc", "gnumake", "nodePackages.node-gyp"]
+
+[phases.install]
+cmds = ["npm install --prefix server", "npm install --prefix client"]
+
+[phases.build]
+cmds = ["npm run build --prefix client"]
+
+[start]
+cmd = "NODE_ENV=production node server/db/seed.js && NODE_ENV=production node server/index.js"
