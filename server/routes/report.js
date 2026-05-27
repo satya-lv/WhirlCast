@@ -65,8 +65,11 @@ router.get('/', (req, res) => {
       `SELECT branch, sku, month, value FROM forecast_runs WHERE scenario_id=? AND month IN ('06-2026','07-2026','08-2026','09-2026','10-2026','11-2026') ORDER BY branch, sku, month`
     ).all(sid) : [];
 
+    const overrides = db.prepare(`SELECT branch, sku, month, override_value FROM branch_overrides WHERE cycle_id=? AND override_value IS NOT NULL`).all(cycle.cycle_id);
+
     db.close();
     res.json({
+      overrides,
       kpis: {
         totalUnits: scenario?.total_units || 124850,
         accuracy: scenario?.accuracy || 87.3,
