@@ -57,6 +57,12 @@ const BRANCH_STATS = {
 };
 
 const CATEGORIES = ['Direct Cool Refrigerator','Frost Free Refrigerator','Washing Machine','Air Conditioner','Microwave','Induction'];
+const BRANCHES   = ['Mumbai','New Delhi','Kolkata','Chennai','Bangalore','Hyderabad','Pune','Ahmedabad'];
+
+/* Seed AI base (6-month sum per category × branch factor) for fallback when reportData is empty */
+const SEED_CAT_BASE = { 'Direct Cool Refrigerator':1800, 'Frost Free Refrigerator':2060, 'Washing Machine':3620, 'Air Conditioner':4905, 'Microwave':558, 'Induction':430 };
+const BRANCH_FACTORS_OC = { 'Mumbai':1.25,'New Delhi':1.22,'Kolkata':0.95,'Chennai':1.05,'Bangalore':1.08,'Hyderabad':0.98,'Pune':0.88,'Ahmedabad':0.85 };
+const seedAI = (cat, branch) => Math.round((SEED_CAT_BASE[cat]||1000) * (BRANCH_FACTORS_OC[branch]||1.0));
 
 const CustomTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
@@ -116,6 +122,8 @@ export default function OverrideConflicts() {
   const [expandedCats, setExpandedCats]         = useState({});
   const [expandedBranches, setExpandedBranches] = useState({});
   const [filterCats, setFilterCats]             = useState([]);
+  const [chartViewBy, setChartViewBy]           = useState('Category');
+  const [filterChartBranches, setFilterChartBranches] = useState([]);
 
   const isReadOnly  = user?.role === 'demand_planning';
   const canResolve  = user?.role === 'category_team';
@@ -182,18 +190,18 @@ export default function OverrideConflicts() {
     });
   })();
 
-  /* ── Branch rows: only branches that have submitted overrides for that category ── */
+  /* ── Branch rows: ALL 8 branches — show 0% deviation for branches with no overrides ── */
   const getBranchOverrideRows = (cat) => {
     const catOvs = overrides.filter(o => CAT_MAP[o.sku] === cat);
-    const branches = [...new Set(catOvs.map(o => o.branch))];
-    return branches.map(branch => {
+    return BRANCHES.map(branch => {
       const bOvs = catOvs.filter(o => o.branch === branch);
-      const aiTotal = (reportData?.by_branch_sku||[])
+      const reportAI = (reportData?.by_branch_sku||[])
         .filter(r => r.branch === branch && CAT_MAP[r.sku] === cat)
-        .reduce((s, r) => s + (r.value||0), 0);
+        .reduce((s,r) => s + (r.value||0), 0);
+      const aiTotal = reportAI || bOvs.reduce((s,o) => s + (o.ai_forecast||0), 0) || seedAI(cat, branch);
       const overriddenAI  = bOvs.reduce((s,o) => s + (o.ai_forecast||0), 0);
       const overriddenVal = bOvs.reduce((s,o) => s + (o.override_value||0), 0);
-      const overrideTotal = aiTotal - overriddenAI + overriddenVal;
+      const overrideTotal = bOvs.length > 0 ? (aiTotal - overriddenAI + overriddenVal) : aiTotal;
       const deviation = aiTotal > 0 ? ((overrideTotal - aiTotal) / aiTotal * 100) : 0;
       const skuDev = {};
       bOvs.forEach(o => { skuDev[o.sku] = (skuDev[o.sku]||0) + Math.abs(o.deviation||0); });
@@ -217,13 +225,32 @@ export default function OverrideConflicts() {
     });
   };
 
-  const chartData = catRows.map(r => ({
-    category: r.cat,
+  const catChartData = catRows.map(r => ({
+    name: r.cat.length > 18 ? r.cat.split(' ').slice(-2).join(' ') : r.cat,
+    fullName: r.cat,
     'AI Forecast': r.aiTotal,
     'After Overrides': r.overrideTotal || r.aiTotal,
   }));
 
-  const filteredChartData = filterCats.length ? chartData.filter(d => filterCats.includes(d.category)) : chartData;
+  const branchChartData = BRANCHES.map(branch => {
+    const effCats = filterCats.length ? CATEGORIES.filter(c => filterCats.includes(c)) : CATEGORIES;
+    const brOvs = overrides.filter(o => o.branch === branch);
+    const aiTot = effCats.reduce((sum, cat) => {
+      const rep = (reportData?.by_branch_sku||[]).filter(r => r.branch === branch && CAT_MAP[r.sku] === cat).reduce((s,r)=>s+(r.value||0),0);
+      return sum + (rep || brOvs.filter(o=>CAT_MAP[o.sku]===cat).reduce((s,o)=>s+(o.ai_forecast||0),0) || seedAI(cat, branch));
+    }, 0);
+    const overrOvs = brOvs.filter(o => effCats.includes(CAT_MAP[o.sku]));
+    const overriddenAI  = overrOvs.reduce((s,o)=>s+(o.ai_forecast||0), 0);
+    const overriddenVal = overrOvs.reduce((s,o)=>s+(o.override_value||0), 0);
+    const afterOv = overrOvs.length > 0 ? (aiTot - overriddenAI + overriddenVal) : aiTot;
+    return { name: branch, 'AI Forecast': aiTot, 'After Overrides': afterOv };
+  });
+
+  const activeChartData = chartViewBy === 'Branch'
+    ? (filterChartBranches.length ? branchChartData.filter(d => filterChartBranches.includes(d.name)) : branchChartData)
+    : (filterCats.length ? catChartData.filter(d => filterCats.includes(d.fullName)) : catChartData);
+
+  const filteredChartData = activeChartData;
 
   const devColor = (dev) => Math.abs(dev) < 10 ? '#16A34A' : Math.abs(dev) < 20 ? '#D97706' : '#DC2626';
 
@@ -419,19 +446,31 @@ export default function OverrideConflicts() {
             </div>
           </div>
 
-          {/* Bar Chart with category filter */}
+          {/* Bar Chart with granularity filters */}
           <div style={{ background:'var(--card)', borderRadius:12, padding:'20px', boxShadow:'var(--shadow-sm)', border:'0.5px solid var(--border)' }}>
             {/* Filter bar */}
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10, flexWrap:'wrap', gap:8 }}>
               <h3 style={{ margin:0, fontSize:14, fontWeight:600 }}>AI Forecast vs After Overrides</h3>
-              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                <span style={{ fontSize:11, color:'var(--text-3)' }}>Filter:</span>
-                <MultiSelectDropdown label="Categories" options={CATEGORIES} selected={filterCats} onChange={setFilterCats}/>
+              <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
+                {/* View by toggle */}
+                <div style={{ display:'flex', gap:3, background:'#F4F6FA', borderRadius:8, padding:3 }}>
+                  {['Category','Branch'].map(v => (
+                    <button key={v} onClick={() => setChartViewBy(v)} style={{ background:chartViewBy===v?'var(--navy-accent)':'transparent', color:chartViewBy===v?'white':'var(--text-2)', border:'none', borderRadius:6, padding:'4px 12px', fontSize:11, cursor:'pointer', fontFamily:'Inter', fontWeight:chartViewBy===v?600:400 }}>
+                      {v}
+                    </button>
+                  ))}
+                </div>
+                {chartViewBy === 'Category' && (
+                  <MultiSelectDropdown label="Categories" options={CATEGORIES} selected={filterCats} onChange={setFilterCats}/>
+                )}
+                {chartViewBy === 'Branch' && (
+                  <MultiSelectDropdown label="Branches" options={BRANCHES} selected={filterChartBranches} onChange={setFilterChartBranches}/>
+                )}
               </div>
             </div>
 
-            {/* Filter pills */}
-            {filterCats.length > 0 && filterCats.length < CATEGORIES.length && (
+            {/* Active filter pills */}
+            {(filterCats.length > 0 || filterChartBranches.length > 0) && (
               <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginBottom:10 }}>
                 {filterCats.map(cat => (
                   <span key={cat} style={{ background:'#EFF6FF', color:'#1B3A6B', border:'1px solid #BFDBFE', borderRadius:12, padding:'2px 10px', fontSize:11, fontWeight:600, display:'flex', alignItems:'center', gap:4 }}>
@@ -439,11 +478,17 @@ export default function OverrideConflicts() {
                     <button onClick={() => setFilterCats(v => v.filter(c => c !== cat))} style={{ background:'none', border:'none', cursor:'pointer', padding:0, color:'#1B3A6B', lineHeight:1, fontSize:14, fontFamily:'Inter' }}>×</button>
                   </span>
                 ))}
+                {filterChartBranches.map(b => (
+                  <span key={b} style={{ background:'#F0FDF4', color:'#15803D', border:'1px solid #BBF7D0', borderRadius:12, padding:'2px 10px', fontSize:11, fontWeight:600, display:'flex', alignItems:'center', gap:4 }}>
+                    {b}
+                    <button onClick={() => setFilterChartBranches(v => v.filter(x => x !== b))} style={{ background:'none', border:'none', cursor:'pointer', padding:0, color:'#15803D', lineHeight:1, fontSize:14, fontFamily:'Inter' }}>×</button>
+                  </span>
+                ))}
               </div>
             )}
 
             <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={filteredChartData} margin={{ top:5, right:10, left:0, bottom:40 }}>
+              <BarChart data={filteredChartData} margin={{ top:5, right:10, left:0, bottom:chartViewBy==='Branch'?5:40 }}>
                 <defs>
                   <linearGradient id="barGradNavy" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%"   stopColor="#1B3A6B" stopOpacity={1}/>
@@ -455,7 +500,7 @@ export default function OverrideConflicts() {
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#F0F0F0"/>
-                <XAxis dataKey="category" tick={{ fontSize:9, fill:'#6B7280' }} angle={-20} textAnchor="end"/>
+                <XAxis dataKey="name" tick={{ fontSize:9, fill:'#6B7280' }} angle={chartViewBy==='Category'?-20:0} textAnchor={chartViewBy==='Category'?'end':'middle'}/>
                 <YAxis tick={{ fontSize:10, fill:'#6B7280' }} tickFormatter={v => (v/1000).toFixed(0)+'k'}/>
                 <Tooltip content={<CustomTooltip/>}/>
                 <Legend/>

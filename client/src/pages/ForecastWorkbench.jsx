@@ -116,15 +116,50 @@ const downloadCSV = (rows, filename) => {
   URL.revokeObjectURL(url);
 };
 
+/* ── MultiSelectDropdown ── */
+function MultiSelectDropdown({ label, options, selected, onChange }) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef();
+  React.useEffect(() => {
+    const handler = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+  const display = selected.length === 0 || selected.length === options.length ? `All ${label}` : `${selected.length} selected`;
+  return (
+    <div ref={ref} style={{ position:'relative' }}>
+      <button onClick={() => setOpen(o => !o)} style={{ background:'var(--card)', border:'0.5px solid var(--border)', borderRadius:7, padding:'5px 10px', fontSize:12, cursor:'pointer', color:'var(--text-1)', whiteSpace:'nowrap', display:'flex', alignItems:'center', gap:6, minWidth:110 }}>
+        {display} <span style={{ fontSize:9 }}>▾</span>
+      </button>
+      {open && (
+        <div style={{ position:'absolute', top:'calc(100% + 4px)', left:0, zIndex:60, background:'var(--card)', border:'0.5px solid var(--border)', borderRadius:8, boxShadow:'0 4px 16px rgba(0,0,0,0.12)', padding:'6px 0', minWidth:200, maxHeight:240, overflowY:'auto' }}>
+          <label style={{ display:'flex', alignItems:'center', gap:8, padding:'5px 12px', cursor:'pointer', fontSize:12 }}>
+            <input type="checkbox" checked={selected.length===0||selected.length===options.length}
+              onChange={() => onChange([])} style={{ accentColor:'#1B3A6B', cursor:'pointer' }}/>
+            <em style={{ color:'var(--text-2)' }}>All</em>
+          </label>
+          {options.map(opt => (
+            <label key={opt} style={{ display:'flex', alignItems:'center', gap:8, padding:'5px 12px', cursor:'pointer', fontSize:12 }}>
+              <input type="checkbox" checked={selected.includes(opt)} style={{ accentColor:'#1B3A6B', cursor:'pointer' }}
+                onChange={e => onChange(e.target.checked ? [...selected,opt] : selected.filter(s=>s!==opt))}/>
+              {opt}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════ */
 export default function ForecastWorkbench() {
   useEffect(() => { document.title = 'WhirlCast — Forecast Workbench'; }, []);
   const { toast } = useToast();
 
   /* Top filter bar */
-  const [filterBranch,   setFilterBranch]   = useState('All');
-  const [filterCategory, setFilterCategory] = useState('All');
-  const [filterSku,      setFilterSku]      = useState('All');
+  const [filterBranch,   setFilterBranch]   = useState([]);
+  const [filterCategory, setFilterCategory] = useState([]);
+  const [filterSku,      setFilterSku]      = useState([]);
   const [filterPeriod,   setFilterPeriod]   = useState('Jun–Nov 2026');
   const [forecastLevel,  setForecastLevel]  = useState('branch_sku');
 
@@ -264,19 +299,24 @@ export default function ForecastWorkbench() {
 
       {/* ── Top filter bar ── */}
       <div style={{ display:'flex', flexWrap:'wrap', gap:10, alignItems:'center', background:'var(--card)', border:'0.5px solid var(--border)', borderRadius:10, padding:'12px 16px', marginBottom:20, boxShadow:'var(--shadow-sm)' }}>
-        {[
-          { label:'Branch',      value:filterBranch,   set:setFilterBranch,   opts:['All',...BRANCHES] },
-          { label:'Category',    value:filterCategory, set:setFilterCategory, opts:['All',...CATEGORIES] },
-          { label:'Product',     value:filterSku,      set:setFilterSku,      opts:['All',...SKUS] },
-          { label:'Time Period', value:filterPeriod,   set:setFilterPeriod,   opts:['Jun–Nov 2026','Jun–Aug 2026','Sep–Nov 2026'] },
-        ].map(f => (
-          <div key={f.label} style={{ display:'flex', flexDirection:'column', gap:3 }}>
-            <span style={{ fontSize:10, fontWeight:600, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:'0.05em' }}>{f.label}</span>
-            <select value={f.value} onChange={e => f.set(e.target.value)} style={{ ...selectStyle, minWidth:120, fontSize:12, padding:'5px 8px' }}>
-              {f.opts.map(o => <option key={o}>{o}</option>)}
-            </select>
-          </div>
-        ))}
+        <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+          <span style={{ fontSize:10, fontWeight:600, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:'0.05em' }}>Branch</span>
+          <MultiSelectDropdown label="Branches" options={BRANCHES} selected={filterBranch} onChange={setFilterBranch}/>
+        </div>
+        <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+          <span style={{ fontSize:10, fontWeight:600, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:'0.05em' }}>Category</span>
+          <MultiSelectDropdown label="Categories" options={CATEGORIES} selected={filterCategory} onChange={setFilterCategory}/>
+        </div>
+        <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+          <span style={{ fontSize:10, fontWeight:600, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:'0.05em' }}>Product</span>
+          <MultiSelectDropdown label="SKUs" options={SKUS} selected={filterSku} onChange={setFilterSku}/>
+        </div>
+        <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+          <span style={{ fontSize:10, fontWeight:600, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:'0.05em' }}>Time Period</span>
+          <select value={filterPeriod} onChange={e => setFilterPeriod(e.target.value)} style={{ ...selectStyle, minWidth:120, fontSize:12, padding:'5px 8px' }}>
+            {['Jun–Nov 2026','Jun–Aug 2026','Sep–Nov 2026'].map(o => <option key={o}>{o}</option>)}
+          </select>
+        </div>
         {/* Forecast Level */}
         <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
           <span style={{ fontSize:10, fontWeight:600, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:'0.05em' }}>📍 Forecast Level</span>
@@ -288,6 +328,28 @@ export default function ForecastWorkbench() {
           {forecastLevel === 'branch_sku' ? '8 branches · 10 SKUs · 480 data points' : FORECAST_LEVELS.find(f=>f.id===forecastLevel)?.desc}
         </div>
       </div>
+
+      {/* Active filter pills */}
+      {(filterBranch.length > 0 || filterCategory.length > 0 || filterSku.length > 0) && (
+        <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginBottom:10 }}>
+          <span style={{ fontSize:11, color:'var(--text-3)', alignSelf:'center' }}>Active filters:</span>
+          {filterBranch.map(b => (
+            <span key={b} style={{ background:'#EFF6FF', color:'#1B3A6B', border:'1px solid #BFDBFE', borderRadius:12, padding:'2px 8px', fontSize:11, fontWeight:600, display:'flex', alignItems:'center', gap:4 }}>
+              {b} <button onClick={() => setFilterBranch(v=>v.filter(x=>x!==b))} style={{ background:'none', border:'none', cursor:'pointer', padding:0, lineHeight:1, fontSize:14, color:'#1B3A6B' }}>×</button>
+            </span>
+          ))}
+          {filterCategory.map(c => (
+            <span key={c} style={{ background:'#F0FDF4', color:'#15803D', border:'1px solid #BBF7D0', borderRadius:12, padding:'2px 8px', fontSize:11, fontWeight:600, display:'flex', alignItems:'center', gap:4 }}>
+              {c} <button onClick={() => setFilterCategory(v=>v.filter(x=>x!==c))} style={{ background:'none', border:'none', cursor:'pointer', padding:0, lineHeight:1, fontSize:14, color:'#15803D' }}>×</button>
+            </span>
+          ))}
+          {filterSku.map(s => (
+            <span key={s} style={{ background:'#FFFBEB', color:'#92400E', border:'1px solid #FDE68A', borderRadius:12, padding:'2px 8px', fontSize:11, fontWeight:600, display:'flex', alignItems:'center', gap:4 }}>
+              {s} <button onClick={() => setFilterSku(v=>v.filter(x=>x!==s))} style={{ background:'none', border:'none', cursor:'pointer', padding:0, lineHeight:1, fontSize:14, color:'#92400E' }}>×</button>
+            </span>
+          ))}
+        </div>
+      )}
 
       <div style={{ display:'grid', gridTemplateColumns:'300px 1fr', gap:20, alignItems:'start' }}>
         {/* ── LEFT: Config panel ── */}

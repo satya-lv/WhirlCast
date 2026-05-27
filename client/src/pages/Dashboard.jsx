@@ -6,6 +6,7 @@ import IndiaMap from '../components/shared/IndiaMap';
 import { PageHeader } from '../components/shared/PageHeader';
 import { toIndianNumber } from '../utils/helpers';
 import { useIsMobile } from '../utils/useIsMobile';
+import { ComposedChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from 'recharts';
 
 const DEFAULT_STEPS = [
   { label: 'Forecast Generated', sub: '14 May',           status: 'done' },
@@ -26,6 +27,28 @@ const STATIC_ACTIVITY = [
 ];
 
 
+const HIST_MONTHS = ["Jun'25","Jul'25","Aug'25","Sep'25","Oct'25","Nov'25","Dec'25","Jan'26","Feb'26","Mar'26","Apr'26","May'26"];
+const FWD_MONTHS  = ["Jun'26","Jul'26","Aug'26","Sep'26","Oct'26","Nov'26"];
+const TREND_ACTUALS = {
+  All: [82400,79200,85600,91200,88300,103400,96700,84200,78900,87400,94600,102300],
+  'Refrigerator': [18200,17500,19100,20400,19600,22800,21300,18600,17400,19300,20900,22600],
+  'Washing Machine': [22100,21300,22900,24500,23700,27700,25900,22600,21200,23400,25300,27400],
+  'Air Conditioner': [31400,30200,32700,34900,33800,39500,36900,32200,30200,33400,36200,39100],
+  'Microwave': [6800,6500,7100,7600,7300,8700,8100,7000,6600,7300,7900,8500],
+  'Induction':  [3900,3700,3800,4000,3900,4700,4500,3800,3600,3900,4300,4700],
+};
+
+const TREND_FORECAST = {
+  All: [108500,115200,122800,118400,109600,101200],
+  'Refrigerator': [23900,25400,27100,26100,24200,22300],
+  'Washing Machine': [29100,30900,32900,31700,29400,27100],
+  'Air Conditioner': [41400,44100,47000,45300,42000,38800],
+  'Microwave': [9100,9700,10300,9900,9200,8500],
+  'Induction':  [5000,5100,5500,5400,5000,4600],
+};
+
+const TREND_CATEGORIES = ['All','Refrigerator','Washing Machine','Air Conditioner','Microwave','Induction'];
+
 export default function Dashboard() {
   useEffect(() => { document.title = 'WhirlCast — Dashboard'; }, []);
   const { user } = useAuth();
@@ -35,6 +58,8 @@ export default function Dashboard() {
   const [kpis, setKpis] = useState(null);
   const [liveBranches, setLiveBranches] = useState([]);
   const [liveSummary, setLiveSummary] = useState(null);
+  const [trendCategory, setTrendCategory] = useState('All');
+  const [trendTimeRange, setTrendTimeRange] = useState('12M');
 
   useEffect(() => {
     fetch('/api/dashboard')
@@ -84,6 +109,21 @@ export default function Dashboard() {
   const handleBranchClick = (branch) => {
     navigate(`/collaboration?branch=${encodeURIComponent(branch)}`);
   };
+
+  const trendChartData = (() => {
+    const actuals = (TREND_ACTUALS[trendCategory] || TREND_ACTUALS['All']);
+    const forecast = (TREND_FORECAST[trendCategory] || TREND_FORECAST['All']);
+    const n = trendTimeRange === '6M' ? 6 : trendTimeRange === '9M' ? 9 : 12;
+    const startHist = HIST_MONTHS.length - n;
+    return [
+      ...HIST_MONTHS.slice(startHist).map((m, i) => ({
+        month: m, Actual: actuals[startHist + i], type: 'hist',
+      })),
+      ...FWD_MONTHS.map((m, i) => ({
+        month: m, 'AI Forecast': forecast[i], type: 'fwd',
+      })),
+    ];
+  })();
 
   return (
     <div style={{ background: 'var(--bg)', minHeight: 'calc(100vh - 52px)', padding: isMobile ? '16px' : '24px', paddingBottom: isMobile ? 80 : undefined }}>
@@ -284,6 +324,70 @@ export default function Dashboard() {
           </div>
         </div>
 
+      </div>
+
+      {/* Forecast vs Actual Trend */}
+      <div className="fade-up-4" style={{ background:'var(--card)', borderRadius:16, padding:'20px', marginTop:16, boxShadow:'var(--shadow-sm)', border:'0.5px solid var(--border)' }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:12, flexWrap:'wrap', gap:8 }}>
+          <div>
+            <h3 style={{ margin:0, fontSize:14, fontWeight:700, color:'var(--text-1)' }}>Forecast vs Actual Trend</h3>
+            <p style={{ margin:'3px 0 0', fontSize:11, color:'var(--text-3)' }}>Historical actuals through May 2026 · AI forecast Jun–Nov 2026</p>
+          </div>
+          <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+            <div style={{ display:'flex', flexDirection:'column', gap:2 }}>
+              <span style={{ fontSize:9, fontWeight:600, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:'0.05em' }}>Category</span>
+              <select value={trendCategory} onChange={e => setTrendCategory(e.target.value)}
+                style={{ padding:'5px 8px', border:'0.5px solid var(--border)', borderRadius:7, fontSize:11, color:'var(--text-1)', background:'var(--card)', fontFamily:'DM Sans,Inter,sans-serif', outline:'none' }}>
+                {TREND_CATEGORIES.map(c => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', gap:2 }}>
+              <span style={{ fontSize:9, fontWeight:600, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:'0.05em' }}>History</span>
+              <select value={trendTimeRange} onChange={e => setTrendTimeRange(e.target.value)}
+                style={{ padding:'5px 8px', border:'0.5px solid var(--border)', borderRadius:7, fontSize:11, color:'var(--text-1)', background:'var(--card)', fontFamily:'DM Sans,Inter,sans-serif', outline:'none' }}>
+                <option value="6M">Last 6M</option>
+                <option value="9M">Last 9M</option>
+                <option value="12M">Full Year</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div style={{ display:'flex', gap:16, marginBottom:10 }}>
+          <span style={{ display:'flex', alignItems:'center', gap:5, fontSize:11, color:'var(--text-2)' }}>
+            <span style={{ width:24, height:2, background:'#1B3A6B', display:'inline-block', borderRadius:2 }}/> Actual
+          </span>
+          <span style={{ display:'flex', alignItems:'center', gap:5, fontSize:11, color:'var(--text-2)' }}>
+            <span style={{ width:24, height:2, background:'#E31837', display:'inline-block', borderRadius:2, borderTop:'2px dashed #E31837' }}/> AI Forecast
+          </span>
+          <span style={{ background:'rgba(227,24,55,0.08)', color:'#E31837', borderRadius:8, padding:'2px 8px', fontSize:10, fontWeight:600 }}>
+            ↑ {trendCategory === 'All' ? '6.1' : trendCategory === 'Air Conditioner' ? '6.5' : '5.8'}% vs LY
+          </span>
+        </div>
+        <ResponsiveContainer width="100%" height={220}>
+          <ComposedChart data={trendChartData} margin={{ top:5, right:16, left:0, bottom:5 }}>
+            <defs>
+              <linearGradient id="actGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#1B3A6B" stopOpacity={0.15}/>
+                <stop offset="95%" stopColor="#1B3A6B" stopOpacity={0}/>
+              </linearGradient>
+              <linearGradient id="fcstGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#E31837" stopOpacity={0.12}/>
+                <stop offset="95%" stopColor="#E31837" stopOpacity={0}/>
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)"/>
+            <XAxis dataKey="month" tick={{ fontSize:10, fill:'var(--text-3)' }}/>
+            <YAxis tick={{ fontSize:10, fill:'var(--text-3)' }} tickFormatter={v => (v/1000).toFixed(0)+'k'}/>
+            <Tooltip
+              contentStyle={{ background:'var(--card)', borderRadius:8, border:'0.5px solid var(--border)', fontSize:12 }}
+              formatter={(v, name) => [v?.toLocaleString('en-IN'), name]}
+            />
+            <Legend iconType="line" wrapperStyle={{ fontSize:11 }}/>
+            <ReferenceLine x="Jun'26" stroke="#9CA3AF" strokeDasharray="4 2" label={{ value:'Forecast →', position:'top', fontSize:9, fill:'#9CA3AF' }}/>
+            <Area type="monotone" dataKey="Actual" stroke="#1B3A6B" strokeWidth={2} fill="url(#actGrad)" dot={false} connectNulls/>
+            <Area type="monotone" dataKey="AI Forecast" stroke="#E31837" strokeWidth={2} strokeDasharray="5 3" fill="url(#fcstGrad)" dot={false} connectNulls/>
+          </ComposedChart>
+        </ResponsiveContainer>
       </div>
 
       {/* Live data indicator */}

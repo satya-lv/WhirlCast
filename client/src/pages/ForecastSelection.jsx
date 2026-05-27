@@ -165,21 +165,42 @@ export default function ForecastSelection() {
   const effBranches = compBranch.length ? compBranch : BRANCHES;
   const effSkus     = (compSku.length ? compSku : SKUS).filter(s => compCat === 'All' || CAT_MAP[s] === compCat);
 
-  /* Chart data — aggregate to branch level per scenario */
+  /* Chart lines — keys depend on View Level */
+  const chartLineKeys = useMemo(() => {
+    if (!sc.length) return [];
+    if (viewLevel === 'Branch') {
+      return sc.flatMap(s => effBranches.map(b => `${s.name} — ${b}`));
+    }
+    if (viewLevel === 'Category') {
+      const cats = compCat === 'All' ? ['Refrigerator','Washing Machine','Air Conditioner','Microwave','Induction'] : [compCat];
+      return sc.flatMap(s => cats.map(c => `${s.name} — ${c}`));
+    }
+    return sc.map(s => s.name); // National or Branch×SKU → aggregate per scenario
+  }, [sc, viewLevel, effBranches, compCat]);
+
+  /* Chart data — respects View Level */
   const chartData = useMemo(() => {
     if (!sc.length) return [];
     return MONTHS_FWD.map((m, mi) => {
       const row = { month: MONTH_LBL[mi] };
-      sc.forEach(s => {
-        const total = effBranches.reduce((sum, b) => {
-          const branchTotal = effSkus.reduce((ss, sku) => ss + getVal(s.runs, b, sku, m), 0);
-          return sum + branchTotal;
-        }, 0);
-        row[s.name] = total;
-      });
+      if (viewLevel === 'Branch') {
+        sc.forEach(s => effBranches.forEach(b => {
+          row[`${s.name} — ${b}`] = effSkus.reduce((ss, sku) => ss + getVal(s.runs, b, sku, m), 0);
+        }));
+      } else if (viewLevel === 'Category') {
+        const cats = compCat === 'All' ? ['Refrigerator','Washing Machine','Air Conditioner','Microwave','Induction'] : [compCat];
+        sc.forEach(s => cats.forEach(cat => {
+          const catSkus = effSkus.filter(sk => CAT_MAP[sk] === cat);
+          row[`${s.name} — ${cat}`] = effBranches.reduce((sum, b) => sum + catSkus.reduce((ss, sku) => ss + getVal(s.runs, b, sku, m), 0), 0);
+        }));
+      } else {
+        sc.forEach(s => {
+          row[s.name] = effBranches.reduce((sum, b) => sum + effSkus.reduce((ss, sku) => ss + getVal(s.runs, b, sku, m), 0), 0);
+        });
+      }
       return row;
     });
-  }, [sc, effBranches, effSkus, fbMap]);
+  }, [sc, viewLevel, effBranches, effSkus, compCat, fbMap]);
 
   /* Deepdive table rows */
   const deepDiveRows = useMemo(() => {
@@ -408,7 +429,8 @@ export default function ForecastSelection() {
                 <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10, flexWrap:'wrap', gap:8 }}>
                   <h3 style={{ margin:0, fontSize:14, fontWeight:600 }}>Forecast Trend Comparison</h3>
                   <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                    <MultiSelectDropdown label="Scenarios" options={sc.map(s=>s.name)} selected={trendScenFilter} onChange={setTrendScenFilter}/>
+                    <MultiSelectDropdown label="Scenarios" options={sc.map(s=>s.name)} selected={trendScenFilter} onChange={v=>{setTrendScenFilter(v);}}/>
+                    <span style={{ fontSize:10, color:'var(--text-3)', background:'#F4F6FA', borderRadius:6, padding:'3px 8px' }}>{viewLevel}</span>
                     <select value={trendTimeRange} onChange={e => setTrendTimeRange(e.target.value)}
                       style={{ padding:'5px 8px', border:'0.5px solid var(--border)', borderRadius:7, fontSize:11, color:'var(--text-1)', background:'var(--card)', fontFamily:'Inter', outline:'none' }}>
                       <option value="All">All Months</option>
@@ -429,16 +451,18 @@ export default function ForecastSelection() {
                 )}
                 <ResponsiveContainer width="100%" height={250}>
                   {(() => {
-                    const activeSc = trendScenFilter.length ? sc.filter(s => trendScenFilter.includes(s.name)) : sc;
+                    const activeKeys = trendScenFilter.length
+                      ? chartLineKeys.filter(k => trendScenFilter.some(n => k.startsWith(n)))
+                      : chartLineKeys;
                     const n = trendTimeRange === '3M' ? 3 : trendTimeRange === '6M' ? 6 : chartData.length;
                     const filteredData = chartData.slice(-n);
                     return (
                       <ComposedChart data={filteredData} margin={{top:5,right:20,left:0,bottom:5}}>
                         <defs>
-                          {activeSc.map((s,si) => (
-                            <linearGradient key={s.scenario_id} id={`scG${si}`} x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%"  stopColor={LINE_COLORS[si]} stopOpacity={0.15}/>
-                              <stop offset="95%" stopColor={LINE_COLORS[si]} stopOpacity={0}/>
+                          {activeKeys.map((k,ki) => (
+                            <linearGradient key={ki} id={`scG${ki}`} x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%"  stopColor={LINE_COLORS[ki%LINE_COLORS.length]} stopOpacity={0.15}/>
+                              <stop offset="95%" stopColor={LINE_COLORS[ki%LINE_COLORS.length]} stopOpacity={0}/>
                             </linearGradient>
                           ))}
                         </defs>
@@ -446,9 +470,9 @@ export default function ForecastSelection() {
                         <XAxis dataKey="month" tick={{fontSize:11,fill:'var(--text-2)'}}/>
                         <YAxis tick={{fontSize:11,fill:'var(--text-2)'}} tickFormatter={v=>(v/1000).toFixed(0)+'k'}/>
                         <Tooltip content={<CustomTooltip/>}/>
-                        <Legend/>
-                        {activeSc.map((s,si) => (
-                          <Area key={s.scenario_id} type="monotone" dataKey={s.name} stroke={LINE_COLORS[si]} strokeWidth={2} fill={`url(#scG${si})`} dot={false} isAnimationActive={true} animationDuration={800} strokeDasharray={si>0?'5 3':'none'}/>
+                        <Legend wrapperStyle={{fontSize:10}}/>
+                        {activeKeys.map((key,ki) => (
+                          <Area key={key} type="monotone" dataKey={key} stroke={LINE_COLORS[ki%LINE_COLORS.length]} strokeWidth={2} fill={`url(#scG${ki})`} dot={false} isAnimationActive animationDuration={800} strokeDasharray={ki>0?'5 3':'none'}/>
                         ))}
                       </ComposedChart>
                     );
