@@ -25,8 +25,10 @@ app.use('/api/cycles', require('./routes/cycles'));
 app.get('/api/health', (req, res) => res.json({ status: 'ok', app: 'WhirlCast', version: '1.0.0' }));
 
 if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, '../client/build')));
-  app.get('*', (req, res) => res.sendFile(path.join(__dirname, '../client/build/index.html')));
+  const clientBuild = path.join(__dirname, '..', 'client', 'build');
+  console.log('Serving static files from:', clientBuild);
+  app.use(express.static(clientBuild));
+  app.get('*', (req, res) => res.sendFile(path.join(clientBuild, 'index.html')));
 }
 
 app.listen(PORT, () => {
