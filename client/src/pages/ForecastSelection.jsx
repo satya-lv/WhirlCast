@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Trophy, CheckCircle, Eye, Trash2, X } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { Trophy, CheckCircle, Eye, X } from 'lucide-react';
 import { ComposedChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import Modal from '../components/shared/Modal';
 import { useToast } from '../context/ToastContext';
@@ -155,11 +155,11 @@ export default function ForecastSelection() {
   const sc = comparison?.scenarios || [];
   const fbMap = comparison?.fallbackMap || {};
 
-  const getVal = (runsArr, branch, sku, month) => {
+  const getVal = useCallback((runsArr, branch, sku, month) => {
     if (!runsArr) return fbMap[`${branch}|${sku}|${month}`] || 1;
     const row = runsArr.find(r => r.branch===branch && r.sku===sku && r.month===month);
     return row?.value || fbMap[`${branch}|${sku}|${month}`] || 1;
-  };
+  }, [fbMap]);
 
   /* Effective filter sets (empty = all) */
   const effBranches = compBranch.length ? compBranch : BRANCHES;
@@ -200,7 +200,7 @@ export default function ForecastSelection() {
       }
       return row;
     });
-  }, [sc, viewLevel, effBranches, effSkus, compCat, fbMap]);
+  }, [sc, viewLevel, effBranches, effSkus, compCat, fbMap, getVal]);
 
   /* Deepdive table rows */
   const deepDiveRows = useMemo(() => {
@@ -238,7 +238,7 @@ export default function ForecastSelection() {
       rows.push({ label1:'National Total', label2:'', v1, v2, t1, t2, delta: t1>0?((t2-t1)/t1*100).toFixed(1):'0.0' });
     }
     return rows;
-  }, [sc, viewLevel, effBranches, effSkus, compCat, fbMap]);
+  }, [sc, viewLevel, effBranches, effSkus, compCat, fbMap, getVal]);
 
   const getWinner = field => scenarios.reduce((best,s) => {
     if (field==='accuracy') return (!best||(s.accuracy||0)>(best.accuracy||0))?s:best;
