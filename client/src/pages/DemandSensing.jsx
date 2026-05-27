@@ -55,6 +55,7 @@ const CustomTooltip = ({ active, payload, label }) => {
 };
 
 export default function DemandSensing() {
+  useEffect(() => { document.title = 'WhirlCast — Demand Sensing'; }, []);
   const { toast } = useToast();
   const { user }  = useAuth();
   const isBranchSales = user?.role === 'branch_sales';

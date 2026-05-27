@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Edit2, Trash2, Upload, Download } from 'lucide-react';
 import Modal from '../components/shared/Modal';
 import { useToast } from '../context/ToastContext';
@@ -8,39 +8,106 @@ const ROLE_COLORS = { demand_planning: '#1B3A6B', branch_sales: '#2563EB', categ
 const ROLE_LABELS = { demand_planning: 'Demand Planner', branch_sales: 'Branch Manager', category_team: 'Category Mgr', admin: 'Admin' };
 const BRANCHES = ['All','Mumbai','New Delhi','Kolkata','Chennai','Bangalore','Hyderabad','Pune','Ahmedabad'];
 const ROLES = ['demand_planning','branch_sales','category_team','admin'];
+const CATEGORIES = ['Refrigerator','Washing Machine','Air Conditioner','Microwave','Dishwasher'];
+
+const EMPTY_PRODUCT = { sku: '', category: 'Refrigerator', segment: '', subsegment: '', price: '', star_rating: '4' };
+
+function downloadCSV(filename, headers, rows) {
+  const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = filename;
+  a.click();
+}
 
 export default function AdminConsole() {
+  useEffect(() => { document.title = 'WhirlCast — Admin Console'; }, []);
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState('products');
   const [products, setProducts] = useState([]);
   const [lfl, setLfl] = useState([]);
   const [users, setUsers] = useState([]);
+
+  const [showAddProduct, setShowAddProduct] = useState(false);
+  const [editProduct, setEditProduct] = useState(null);
+  const [newProduct, setNewProduct] = useState(EMPTY_PRODUCT);
+
   const [showAddUser, setShowAddUser] = useState(false);
+  const [editUser, setEditUser] = useState(null);
   const [showAddLfl, setShowAddLfl] = useState(false);
   const [newUser, setNewUser] = useState({ name: '', email: '', role: 'demand_planning', branch_access: 'All' });
   const [newLfl, setNewLfl] = useState({ old_sku: '', new_sku: '', effective_date: '', reason: '' });
 
-  useEffect(() => {
-    fetch('/api/admin/products').then(r => r.json()).then(d => setProducts(d.products || []));
-    fetch('/api/admin/lfl').then(r => r.json()).then(d => setLfl(d.mappings || []));
-    fetch('/api/admin/users').then(r => r.json()).then(d => setUsers(d.users || []));
-  }, []);
+  const productCsvRef = useRef();
+  const lflCsvRef = useRef();
 
-  const handleAddUser = async () => {
-    if (!newUser.name || !newUser.email) { toast.warning('Fill required fields'); return; }
-    await fetch('/api/admin/users/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newUser) });
-    const d = await fetch('/api/admin/users').then(r => r.json());
-    setUsers(d.users || []);
-    setShowAddUser(false);
-    setNewUser({ name: '', email: '', role: 'demand_planning', branch_access: 'All' });
-    toast.success('User added');
+  const refetchProducts = () => fetch('/api/admin/products').then(r => r.json()).then(d => setProducts(d.products || []));
+  const refetchLfl     = () => fetch('/api/admin/lfl').then(r => r.json()).then(d => setLfl(d.mappings || []));
+  const refetchUsers   = () => fetch('/api/admin/users').then(r => r.json()).then(d => setUsers(d.users || []));
+
+  useEffect(() => { refetchProducts(); refetchLfl(); refetchUsers(); }, []);
+
+  // ── Products ──────────────────────────────────────────────────
+  const handleAddProduct = async () => {
+    if (!newProduct.sku || !newProduct.category) { toast.warning('SKU and Category are required'); return; }
+    const res = await fetch('/api/admin/products/add', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newProduct),
+    });
+    const data = await res.json();
+    if (!res.ok) { toast.error(data.error || 'Failed to add product'); return; }
+    await refetchProducts();
+    setShowAddProduct(false);
+    setNewProduct(EMPTY_PRODUCT);
+    toast.success('Product added');
   };
 
+  const handleEditProduct = async () => {
+    if (!editProduct.category) { toast.warning('Category is required'); return; }
+    await fetch(`/api/admin/products/${editProduct.sku}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ category: editProduct.category, segment: editProduct.segment, subsegment: editProduct.subsegment, price: editProduct.price, star_rating: editProduct.star_rating }),
+    });
+    await refetchProducts();
+    setEditProduct(null);
+    toast.success('Product updated');
+  };
+
+  const handleDeleteProduct = async (sku) => {
+    if (!window.confirm(`Deactivate ${sku}?`)) return;
+    await fetch(`/api/admin/products/${sku}`, { method: 'DELETE' });
+    await refetchProducts();
+    toast.info(`${sku} deactivated`);
+  };
+
+  const handleToggleProduct = async (sku, currentActive) => {
+    await fetch(`/api/admin/products/${sku}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active: currentActive ? 0 : 1 }),
+    });
+    setProducts(prev => prev.map(p => p.sku === sku ? { ...p, active: currentActive ? 0 : 1 } : p));
+  };
+
+  const handleProductCsvUpload = async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    const form = new FormData(); form.append('file', file);
+    const res = await fetch('/api/admin/products/upload', { method: 'POST', body: form });
+    const data = await res.json();
+    await refetchProducts();
+    toast.success(data.message || 'Uploaded');
+    e.target.value = '';
+  };
+
+  const handleProductTemplate = () => {
+    downloadCSV('product_master_template.csv',
+      ['SKU','Category','Segment','Subsegment','Price','StarRating'],
+      [['REF_240L_FrostFree','Refrigerator','Double Door','Frost Free','28000','4']]);
+  };
+
+  // ── LFL ───────────────────────────────────────────────────────
   const handleAddLfl = async () => {
-    if (!newLfl.old_sku || !newLfl.new_sku) { toast.warning('Fill required fields'); return; }
+    if (!newLfl.old_sku || !newLfl.new_sku) { toast.warning('Old SKU and New SKU are required'); return; }
     await fetch('/api/admin/lfl/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newLfl) });
-    const d = await fetch('/api/admin/lfl').then(r => r.json());
-    setLfl(d.mappings || []);
+    await refetchLfl();
     setShowAddLfl(false);
     setNewLfl({ old_sku: '', new_sku: '', effective_date: '', reason: '' });
     toast.success('LFL mapping added');
@@ -52,14 +119,48 @@ export default function AdminConsole() {
     toast.info('Mapping deleted');
   };
 
-  const handleToggleUser = async (userId, currentActive) => {
-    await fetch('/api/admin/users/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: userId, active: !currentActive }) });
-    setUsers(prev => prev.map(u => u.user_id === userId ? { ...u, active: currentActive ? 0 : 1 } : u));
+  const handleLflCsvUpload = async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    const form = new FormData(); form.append('file', file);
+    const res = await fetch('/api/admin/lfl/upload', { method: 'POST', body: form });
+    const data = await res.json();
+    await refetchLfl();
+    toast.success(data.message || 'Uploaded');
+    e.target.value = '';
   };
 
-  const handleToggleProduct = async (sku, currentActive) => {
-    await fetch('/api/admin/products/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sku, active: currentActive ? 0 : 1 }) });
-    setProducts(prev => prev.map(p => p.sku === sku ? { ...p, active: currentActive ? 0 : 1 } : p));
+  const handleLflTemplate = () => {
+    downloadCSV('lfl_master_template.csv',
+      ['OldSKU','NewSKU','EffectiveDate','Reason'],
+      [['REF_185L_DirectCool','REF_190L_DirectCool','2026-01-01','Model refresh']]);
+  };
+
+  // ── Users ─────────────────────────────────────────────────────
+  const handleAddUser = async () => {
+    if (!newUser.name || !newUser.email) { toast.warning('Name and Email are required'); return; }
+    await fetch('/api/admin/users/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newUser) });
+    await refetchUsers();
+    setShowAddUser(false);
+    setNewUser({ name: '', email: '', role: 'demand_planning', branch_access: 'All' });
+    toast.success('User added');
+  };
+
+  const handleEditUser = async () => {
+    await fetch(`/api/admin/users/${editUser.user_id}/deactivate`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active: editUser.active }),
+    });
+    await refetchUsers();
+    setEditUser(null);
+    toast.success('User updated');
+  };
+
+  const handleToggleUser = async (userId, currentActive) => {
+    await fetch(`/api/admin/users/${userId}/deactivate`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active: currentActive ? 0 : 1 }),
+    });
+    setUsers(prev => prev.map(u => u.user_id === userId ? { ...u, active: currentActive ? 0 : 1 } : u));
   };
 
   const TABS = [
@@ -94,9 +195,10 @@ export default function AdminConsole() {
         <div style={{ background: '#FFF', borderRadius: 12, boxShadow: 'var(--shadow-sm)', border: '0.5px solid var(--border)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '16px 20px', borderBottom: '1px solid #F0F0F0' }}>
             <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, flex: 1 }}>Product Master ({products.length} SKUs)</h3>
-            <button style={outlineBtn}><Download size={13} /> Template</button>
-            <button style={outlineBtn}><Upload size={13} /> Upload CSV</button>
-            <button style={primaryBtn}><Plus size={13} /> Add SKU</button>
+            <input ref={productCsvRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleProductCsvUpload} />
+            <button onClick={handleProductTemplate} style={outlineBtn}><Download size={13} /> Template</button>
+            <button onClick={() => productCsvRef.current?.click()} style={outlineBtn}><Upload size={13} /> Upload CSV</button>
+            <button onClick={() => { setNewProduct(EMPTY_PRODUCT); setShowAddProduct(true); }} style={primaryBtn}><Plus size={13} /> Add SKU</button>
           </div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
@@ -131,10 +233,10 @@ export default function AdminConsole() {
                     </td>
                     <td style={{ ...tdStyle, textAlign: 'center' }}>
                       <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
-                        <button style={{ background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: 6, padding: '3px 7px', cursor: 'pointer' }}>
+                        <button onClick={() => setEditProduct({ ...p })} style={{ background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: 6, padding: '3px 7px', cursor: 'pointer' }}>
                           <Edit2 size={11} color="#1B3A6B" />
                         </button>
-                        <button style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 6, padding: '3px 7px', cursor: 'pointer' }}>
+                        <button onClick={() => handleDeleteProduct(p.sku)} style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 6, padding: '3px 7px', cursor: 'pointer' }}>
                           <Trash2 size={11} color="#DC2626" />
                         </button>
                       </div>
@@ -154,38 +256,42 @@ export default function AdminConsole() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
               <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Like-for-Like Product Mapping</h3>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button style={outlineBtn}><Download size={13} /> Template</button>
-                <button style={outlineBtn}><Upload size={13} /> Upload CSV</button>
+                <input ref={lflCsvRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleLflCsvUpload} />
+                <button onClick={handleLflTemplate} style={outlineBtn}><Download size={13} /> Template</button>
+                <button onClick={() => lflCsvRef.current?.click()} style={outlineBtn}><Upload size={13} /> Upload CSV</button>
                 <button onClick={() => setShowAddLfl(true)} style={primaryBtn}><Plus size={13} /> Add Mapping</button>
               </div>
             </div>
             <p style={{ margin: 0, fontSize: 12, color: '#6B7280' }}>Map discontinued SKUs to their successor products for accurate forecast comparison</p>
           </div>
           <div style={{ overflowX: 'auto', width: '100%' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-            <thead>
-              <tr style={{ background: '#F8FAFF' }}>
-                {['Old SKU','→','New SKU','Effective Date','Reason','Added By','Actions'].map(h => <th key={h} style={thStyle}>{h}</th>)}
-              </tr>
-            </thead>
-            <tbody>
-              {lfl.map((m, i) => (
-                <tr key={m.id} style={{ background: i % 2 === 0 ? '#FFF' : '#FAFAFA' }}>
-                  <td style={{ ...tdStyle, color: '#DC2626', fontWeight: 500 }}>{m.old_sku}</td>
-                  <td style={{ ...tdStyle, fontSize: 16, color: '#9CA3AF' }}>→</td>
-                  <td style={{ ...tdStyle, color: '#16A34A', fontWeight: 500 }}>{m.new_sku}</td>
-                  <td style={tdStyle}>{m.effective_date}</td>
-                  <td style={{ ...tdStyle, color: '#6B7280', maxWidth: 140 }}>{m.reason}</td>
-                  <td style={tdStyle}>{m.added_by}</td>
-                  <td style={{ ...tdStyle, textAlign: 'center' }}>
-                    <button onClick={() => handleDeleteLfl(m.id)} style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 6, padding: '3px 7px', cursor: 'pointer' }}>
-                      <Trash2 size={11} color="#DC2626" />
-                    </button>
-                  </td>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead>
+                <tr style={{ background: '#F8FAFF' }}>
+                  {['Old SKU','→','New SKU','Effective Date','Reason','Added By','Actions'].map(h => <th key={h} style={thStyle}>{h}</th>)}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {lfl.length === 0 && (
+                  <tr><td colSpan={7} style={{ ...tdStyle, textAlign: 'center', color: '#9CA3AF', padding: 24 }}>No LFL mappings — click Add Mapping to create one.</td></tr>
+                )}
+                {lfl.map((m, i) => (
+                  <tr key={m.id} style={{ background: i % 2 === 0 ? '#FFF' : '#FAFAFA' }}>
+                    <td style={{ ...tdStyle, color: '#DC2626', fontWeight: 500 }}>{m.old_sku}</td>
+                    <td style={{ ...tdStyle, fontSize: 16, color: '#9CA3AF' }}>→</td>
+                    <td style={{ ...tdStyle, color: '#16A34A', fontWeight: 500 }}>{m.new_sku}</td>
+                    <td style={tdStyle}>{m.effective_date}</td>
+                    <td style={{ ...tdStyle, color: '#6B7280', maxWidth: 140 }}>{m.reason}</td>
+                    <td style={tdStyle}>{m.added_by}</td>
+                    <td style={{ ...tdStyle, textAlign: 'center' }}>
+                      <button onClick={() => handleDeleteLfl(m.id)} style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 6, padding: '3px 7px', cursor: 'pointer' }}>
+                        <Trash2 size={11} color="#DC2626" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
@@ -198,54 +304,111 @@ export default function AdminConsole() {
             <button onClick={() => setShowAddUser(true)} style={primaryBtn}><Plus size={13} /> Add User</button>
           </div>
           <div style={{ overflowX: 'auto', width: '100%' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-            <thead>
-              <tr style={{ background: '#F8FAFF' }}>
-                {['Name','Email','Role','Branch Access','Last Login','Status','Actions'].map(h => <th key={h} style={thStyle}>{h}</th>)}
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((u, i) => (
-                <tr key={u.user_id} style={{ background: i % 2 === 0 ? '#FFF' : '#FAFAFA' }}>
-                  <td style={{ ...tdStyle, fontWeight: 600 }}>{u.name}</td>
-                  <td style={{ ...tdStyle, color: '#6B7280' }}>{u.email}</td>
-                  <td style={tdStyle}>
-                    <span style={{
-                      background: `${ROLE_COLORS[u.role]}15`, color: ROLE_COLORS[u.role],
-                      borderRadius: 8, padding: '2px 8px', fontSize: 10, fontWeight: 600,
-                    }}>
-                      {ROLE_LABELS[u.role]}
-                    </span>
-                  </td>
-                  <td style={tdStyle}>{u.branch_access}</td>
-                  <td style={{ ...tdStyle, fontSize: 11, color: '#9CA3AF' }}>
-                    {u.last_login ? new Date(u.last_login).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—'}
-                  </td>
-                  <td style={{ ...tdStyle, textAlign: 'center' }}>
-                    <span style={{
-                      background: u.active ? '#F0FDF4' : '#F9FAFB', color: u.active ? '#16A34A' : '#9CA3AF',
-                      borderRadius: 12, padding: '2px 8px', fontSize: 10, fontWeight: 600,
-                    }}>
-                      {u.active ? 'Active' : 'Inactive'}
-                    </span>
-                  </td>
-                  <td style={{ ...tdStyle, textAlign: 'center' }}>
-                    <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
-                      <button style={{ background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: 6, padding: '3px 7px', cursor: 'pointer' }}>
-                        <Edit2 size={11} color="#1B3A6B" />
-                      </button>
-                      <button onClick={() => handleToggleUser(u.user_id, u.active)} style={{ background: u.active ? '#FEF2F2' : '#F0FDF4', border: `1px solid ${u.active ? '#FECACA' : '#BBF7D0'}`, borderRadius: 6, padding: '3px 7px', cursor: 'pointer', fontSize: 10, fontFamily: 'Inter', color: u.active ? '#DC2626' : '#16A34A' }}>
-                        {u.active ? 'Deactivate' : 'Activate'}
-                      </button>
-                    </div>
-                  </td>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead>
+                <tr style={{ background: '#F8FAFF' }}>
+                  {['Name','Email','Role','Branch Access','Last Login','Status','Actions'].map(h => <th key={h} style={thStyle}>{h}</th>)}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {users.map((u, i) => (
+                  <tr key={u.user_id} style={{ background: i % 2 === 0 ? '#FFF' : '#FAFAFA' }}>
+                    <td style={{ ...tdStyle, fontWeight: 600 }}>{u.name}</td>
+                    <td style={{ ...tdStyle, color: '#6B7280' }}>{u.email}</td>
+                    <td style={tdStyle}>
+                      <span style={{
+                        background: `${ROLE_COLORS[u.role]}15`, color: ROLE_COLORS[u.role],
+                        borderRadius: 8, padding: '2px 8px', fontSize: 10, fontWeight: 600,
+                      }}>
+                        {ROLE_LABELS[u.role]}
+                      </span>
+                    </td>
+                    <td style={tdStyle}>{u.branch_access}</td>
+                    <td style={{ ...tdStyle, fontSize: 11, color: '#9CA3AF' }}>
+                      {u.last_login ? new Date(u.last_login).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—'}
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: 'center' }}>
+                      <span style={{
+                        background: u.active ? '#F0FDF4' : '#F9FAFB', color: u.active ? '#16A34A' : '#9CA3AF',
+                        borderRadius: 12, padding: '2px 8px', fontSize: 10, fontWeight: 600,
+                      }}>
+                        {u.active ? 'Active' : 'Inactive'}
+                      </span>
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: 'center' }}>
+                      <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
+                        <button onClick={() => setEditUser({ ...u })} style={{ background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: 6, padding: '3px 7px', cursor: 'pointer' }}>
+                          <Edit2 size={11} color="#1B3A6B" />
+                        </button>
+                        <button onClick={() => handleToggleUser(u.user_id, u.active)} style={{ background: u.active ? '#FEF2F2' : '#F0FDF4', border: `1px solid ${u.active ? '#FECACA' : '#BBF7D0'}`, borderRadius: 6, padding: '3px 7px', cursor: 'pointer', fontSize: 10, fontFamily: 'Inter', color: u.active ? '#DC2626' : '#16A34A' }}>
+                          {u.active ? 'Deactivate' : 'Activate'}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
+
+      {/* Add Product Modal */}
+      <Modal isOpen={showAddProduct} onClose={() => setShowAddProduct(false)} title="Add New SKU">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div><label style={labelStyle}>SKU Code *</label><input value={newProduct.sku} onChange={e => setNewProduct(p => ({ ...p, sku: e.target.value }))} placeholder="e.g. REF_240L_FrostFree" style={inputStyle} /></div>
+          <div><label style={labelStyle}>Category *</label>
+            <select value={newProduct.category} onChange={e => setNewProduct(p => ({ ...p, category: e.target.value }))} style={selectStyle}>
+              {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+            </select>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div><label style={labelStyle}>Segment</label><input value={newProduct.segment} onChange={e => setNewProduct(p => ({ ...p, segment: e.target.value }))} placeholder="e.g. Double Door" style={inputStyle} /></div>
+            <div><label style={labelStyle}>Subsegment</label><input value={newProduct.subsegment} onChange={e => setNewProduct(p => ({ ...p, subsegment: e.target.value }))} placeholder="e.g. Frost Free" style={inputStyle} /></div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div><label style={labelStyle}>Price (₹)</label><input type="number" value={newProduct.price} onChange={e => setNewProduct(p => ({ ...p, price: e.target.value }))} placeholder="28000" style={inputStyle} /></div>
+            <div><label style={labelStyle}>Star Rating</label>
+              <select value={newProduct.star_rating} onChange={e => setNewProduct(p => ({ ...p, star_rating: e.target.value }))} style={selectStyle}>
+                {[1,2,3,4,5].map(n => <option key={n} value={n}>{n} ★</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+            <button onClick={() => setShowAddProduct(false)} style={cancelBtn}>Cancel</button>
+            <button onClick={handleAddProduct} style={confirmBtn}>Add SKU</button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Edit Product Modal */}
+      <Modal isOpen={!!editProduct} onClose={() => setEditProduct(null)} title={`Edit — ${editProduct?.sku}`}>
+        {editProduct && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div><label style={labelStyle}>Category</label>
+              <select value={editProduct.category} onChange={e => setEditProduct(p => ({ ...p, category: e.target.value }))} style={selectStyle}>
+                {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div><label style={labelStyle}>Segment</label><input value={editProduct.segment || ''} onChange={e => setEditProduct(p => ({ ...p, segment: e.target.value }))} style={inputStyle} /></div>
+              <div><label style={labelStyle}>Subsegment</label><input value={editProduct.subsegment || ''} onChange={e => setEditProduct(p => ({ ...p, subsegment: e.target.value }))} style={inputStyle} /></div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div><label style={labelStyle}>Price (₹)</label><input type="number" value={editProduct.price || ''} onChange={e => setEditProduct(p => ({ ...p, price: e.target.value }))} style={inputStyle} /></div>
+              <div><label style={labelStyle}>Star Rating</label>
+                <select value={editProduct.star_rating || 3} onChange={e => setEditProduct(p => ({ ...p, star_rating: parseInt(e.target.value) }))} style={selectStyle}>
+                  {[1,2,3,4,5].map(n => <option key={n} value={n}>{n} ★</option>)}
+                </select>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+              <button onClick={() => setEditProduct(null)} style={cancelBtn}>Cancel</button>
+              <button onClick={handleEditProduct} style={confirmBtn}>Save Changes</button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {/* Add User Modal */}
       <Modal isOpen={showAddUser} onClose={() => setShowAddUser(false)} title="Add New User">
@@ -263,10 +426,32 @@ export default function AdminConsole() {
             </select>
           </div>
           <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-            <button onClick={() => setShowAddUser(false)} style={{ flex: 1, background: '#F4F6FA', border: '1px solid #E5E7EB', borderRadius: 8, padding: '10px', cursor: 'pointer', fontFamily: 'Inter' }}>Cancel</button>
-            <button onClick={handleAddUser} style={{ flex: 2, background: 'var(--navy-accent)', color: 'white', border: 'none', borderRadius: 8, padding: '10px', cursor: 'pointer', fontFamily: 'Inter', fontWeight: 600 }}>Add User</button>
+            <button onClick={() => setShowAddUser(false)} style={cancelBtn}>Cancel</button>
+            <button onClick={handleAddUser} style={confirmBtn}>Add User</button>
           </div>
         </div>
+      </Modal>
+
+      {/* Edit User Modal */}
+      <Modal isOpen={!!editUser} onClose={() => setEditUser(null)} title={`Edit User — ${editUser?.name}`}>
+        {editUser && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ padding: '10px 12px', background: '#F8FAFF', borderRadius: 8 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#1B3A6B' }}>{editUser.name}</div>
+              <div style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>{editUser.email}</div>
+            </div>
+            <div><label style={labelStyle}>Status</label>
+              <select value={editUser.active} onChange={e => setEditUser(p => ({ ...p, active: parseInt(e.target.value) }))} style={selectStyle}>
+                <option value={1}>Active</option>
+                <option value={0}>Inactive</option>
+              </select>
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+              <button onClick={() => setEditUser(null)} style={cancelBtn}>Cancel</button>
+              <button onClick={handleEditUser} style={confirmBtn}>Save Changes</button>
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* Add LFL Modal */}
@@ -277,8 +462,8 @@ export default function AdminConsole() {
           <div><label style={labelStyle}>Effective Date</label><input type="date" value={newLfl.effective_date} onChange={e => setNewLfl(p => ({ ...p, effective_date: e.target.value }))} style={inputStyle} /></div>
           <div><label style={labelStyle}>Reason</label><textarea value={newLfl.reason} onChange={e => setNewLfl(p => ({ ...p, reason: e.target.value }))} rows={2} style={{ ...inputStyle, resize: 'vertical' }} /></div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => setShowAddLfl(false)} style={{ flex: 1, background: '#F4F6FA', border: '1px solid #E5E7EB', borderRadius: 8, padding: '10px', cursor: 'pointer', fontFamily: 'Inter' }}>Cancel</button>
-            <button onClick={handleAddLfl} style={{ flex: 2, background: 'var(--navy-accent)', color: 'white', border: 'none', borderRadius: 8, padding: '10px', cursor: 'pointer', fontFamily: 'Inter', fontWeight: 600 }}>Add Mapping</button>
+            <button onClick={() => setShowAddLfl(false)} style={cancelBtn}>Cancel</button>
+            <button onClick={handleAddLfl} style={confirmBtn}>Add Mapping</button>
           </div>
         </div>
       </Modal>
@@ -293,3 +478,5 @@ const inputStyle = { width: '100%', padding: '9px 12px', border: '1px solid #E5E
 const selectStyle = { width: '100%', padding: '9px 12px', border: '1px solid #E5E7EB', borderRadius: 8, fontSize: 13, fontFamily: 'Inter', outline: 'none', background: '#FFF', color: '#1A1A2E' };
 const primaryBtn = { background: 'var(--navy-accent)', color: 'white', border: 'none', borderRadius: 8, padding: '7px 14px', fontSize: 12, cursor: 'pointer', fontFamily: 'Inter', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 5 };
 const outlineBtn = { background: '#F4F6FA', border: '1px solid #E5E7EB', borderRadius: 8, padding: '7px 12px', fontSize: 12, cursor: 'pointer', fontFamily: 'Inter', display: 'inline-flex', alignItems: 'center', gap: 4, color: '#1A1A2E' };
+const cancelBtn = { flex: 1, background: '#F4F6FA', border: '1px solid #E5E7EB', borderRadius: 8, padding: '10px', cursor: 'pointer', fontFamily: 'Inter', fontSize: 13 };
+const confirmBtn = { flex: 2, background: 'var(--navy-accent)', color: 'white', border: 'none', borderRadius: 8, padding: '10px', cursor: 'pointer', fontFamily: 'Inter', fontWeight: 600, fontSize: 13 };

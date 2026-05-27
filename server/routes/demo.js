@@ -19,9 +19,9 @@ router.post('/reset', (req, res) => {
       (cycle_id, branch, sku, month, ai_forecast, override_value, reason, override_by, override_on, override_version, status)
       VALUES (?,?,?,?,?,?,?,?,datetime('now'),?,?)
     `);
-    insertOverride.run(1,'Kolkata',  'REF_240L_FrostFree', 'Jun 2026', 201, 225, 'E: Seasonality effects', 'Holly',   1, 'submitted');
-    insertOverride.run(1,'Chennai',  'REF_190L_DirectCool','Jun 2026', 336, 390, 'B: New Promo/Activity',  'James',   1, 'submitted');
-    insertOverride.run(1,'Hyderabad','AC_1.5T_Inverter',   'Jun 2026', 568, 640, 'A: Increase in ranging', 'Kavitha', 1, 'submitted');
+    insertOverride.run(1,'Kolkata',  'REF_240L_FrostFree', '06-2026', 201, 225, 'E: Seasonality effects', 'Holly',   1, 'submitted');
+    insertOverride.run(1,'Chennai',  'REF_190L_DirectCool','06-2026', 336, 390, 'B: New Promo/Activity',  'James',   1, 'submitted');
+    insertOverride.run(1,'Hyderabad','AC_1.5T_Inverter',   '06-2026', 568, 640, 'A: Increase in ranging', 'Kavitha', 1, 'submitted');
 
     // Step 5: Insert one demand sensing history row
     db.prepare(`INSERT INTO demand_sensing_log (cycle_id, filename, file_type, applied, created_at) VALUES (?,?,?,?,datetime('now'))`)

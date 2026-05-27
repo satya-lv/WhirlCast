@@ -22,11 +22,12 @@ const STATIC_ACTIVITY = [
   { icon: '✅', text: 'Scenario 1 finalized by Priya Sharma',       time: '5h ago' },
   { icon: '🟡', text: '6 exceptions detected — 4 acknowledged',     time: '1d ago' },
   { icon: '✦',  text: 'Demand Sensing applied: Q2_Promo_Brief.pdf', time: '1d ago' },
-  { icon: '✅', text: 'Forecast generated for May 2026 cycle',       time: '1d ago' },
+  { icon: '✅', text: 'Forecast generated for Jun 2026 cycle',       time: '1d ago' },
 ];
 
 
 export default function Dashboard() {
+  useEffect(() => { document.title = 'WhirlCast — Dashboard'; }, []);
   const { user } = useAuth();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
@@ -88,8 +89,8 @@ export default function Dashboard() {
     <div style={{ background: 'var(--bg)', minHeight: 'calc(100vh - 52px)', padding: isMobile ? '16px' : '24px', paddingBottom: isMobile ? 80 : undefined }}>
 
       <PageHeader title="Dashboard"
-        subtitle="May 2026 Demand Planning Cycle — Whirlpool India"
-        helpText="This dashboard shows the live status of the May 2026 forecast cycle. Monitor branch override submissions, review KPIs, and navigate to any stage of the planning workflow."/>
+        subtitle="Jun 2026 Demand Planning Cycle — Whirlpool India"
+        helpText="This dashboard shows the live status of the Jun 2026 forecast cycle. Monitor branch override submissions, review KPIs, and navigate to any stage of the planning workflow."/>
 
       {/* Greeting banner */}
       <div className="fade-up" style={{
@@ -102,7 +103,7 @@ export default function Dashboard() {
             Good morning, {user?.name?.split(' ')[0]} 👋
           </h2>
           <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.45)', margin: 0 }}>
-            May 2026 Forecast Cycle ·{' '}
+            Jun 2026 Forecast Cycle ·{' '}
             {(() => {
               const submitted = liveSummary?.branches_submitted ?? (kpis != null ? (8 - kpis.pendingBranches) : null);
               if (submitted === null) return '…loading';
@@ -121,7 +122,7 @@ export default function Dashboard() {
         marginBottom: 20, boxShadow: 'var(--shadow-sm)',
       }}>
         <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '1px', textTransform: 'uppercase',
-          color: 'var(--text-2)', marginBottom: 16 }}>May 2026 Cycle Progress</div>
+          color: 'var(--text-2)', marginBottom: 16 }}>Jun 2026 Cycle Progress</div>
         <div style={{ display: 'flex', alignItems: 'flex-start' }}>
           {cycleSteps.map((step, i) => (
             <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' }}>
@@ -160,7 +161,7 @@ export default function Dashboard() {
       <div className="fade-up-2" style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : 'repeat(4,1fr)', gap: 12, marginBottom: 16 }}>
         <KPICard label="Forecasted Units"      subtitle="Branch × SKU level · 6-month horizon" value={liveSummary ? toIndianNumber(liveSummary.total_units) : kpis ? toIndianNumber(kpis.totalUnits) : '1,24,850'} badge="↑ 8.2% vs last cycle" badgeType="up" spark={SPARK_UNITS} accentColor="var(--navy-accent)" icon="📦"/>
         <KPICard label="Avg Forecast Accuracy" subtitle="Based on last 3 cycles · MAPE method" value={liveSummary ? `${liveSummary.avg_accuracy}%` : kpis ? `${kpis.accuracy}%` : '87.3%'} badge="↓ 1.2% · Target 90%" badgeType="down" spark={SPARK_ACC} accentColor="#D97706" icon="🎯"/>
-        <KPICard label="Pending Overrides"     value={liveSummary ? `${liveSummary.branches_total - liveSummary.branches_submitted} branches` : kpis ? `${kpis.pendingBranches} branches` : '5 branches'} badge={liveSummary ? `${liveSummary.branches_submitted} of 8 submitted` : 'Due 20-May-2026'} badgeType="warn" accentColor="#F59E0B" icon="⏳"/>
+        <KPICard label="Pending Overrides"     value={liveSummary ? `${liveSummary.branches_total - liveSummary.branches_submitted} branches` : kpis ? `${kpis.pendingBranches} branches` : '5 branches'} badge={liveSummary ? `${liveSummary.branches_submitted} of 8 submitted` : 'Due 20-Jun-2026'} badgeType="warn" accentColor="#F59E0B" icon="⏳"/>
         <KPICard label="Unresolved Conflicts"  value={liveSummary ? `${liveSummary.conflicts_count}` : '1'}    badge={liveSummary ? (liveSummary.conflicts_count === 0 ? 'All clear' : `${liveSummary.conflicts_count} flagged`) : 'Loading...'} badgeType={liveSummary?.conflicts_count === 0 ? 'up' : 'warn'} accentColor="#EF4444" icon="⚠️"/>
       </div>
 

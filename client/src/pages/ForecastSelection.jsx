@@ -58,6 +58,7 @@ function MultiSelectDropdown({ label, options, selected, onChange }) {
 }
 
 export default function ForecastSelection() {
+  useEffect(() => { document.title = 'WhirlCast — Forecast Selection'; }, []);
   const { toast } = useToast();
 
   /* Library state */

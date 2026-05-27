@@ -142,6 +142,7 @@ function ExpandableRow({ row, ri, nameEl, subRows, isExpanded, onToggle }) {
 
 /* ═══════════════════════════════════════════════════════════════════ */
 export default function ForecastingReport() {
+  useEffect(() => { document.title = 'WhirlCast — Forecasting Report'; }, []);
   const { user }  = useAuth();
   const { toast } = useToast();
   const isMobile  = useIsMobile();

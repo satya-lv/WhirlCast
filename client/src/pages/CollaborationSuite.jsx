@@ -38,6 +38,7 @@ const CustomTooltip = ({ active, payload, label }) => {
 };
 
 export default function CollaborationSuite() {
+  useEffect(() => { document.title = 'WhirlCast — Collaboration Suite'; }, []);
   const { user } = useAuth();
   const { toast } = useToast();
   const isMobile = useIsMobile();
@@ -181,7 +182,7 @@ export default function CollaborationSuite() {
     <div style={{ padding: isMobile ? '16px' : '24px', maxWidth: 1440, margin: '0 auto', background: 'var(--bg)', minHeight: 'calc(100vh - 52px)', paddingBottom: isMobile ? 80 : undefined }}>
 
       <PageHeader title="Collaboration Suite"
-        subtitle="Branch managers review and submit overrides for May 2026"
+        subtitle="Branch managers review and submit overrides for Jun 2026"
         helpText="Branch managers review the AI forecast here and submit overrides for their branch. The system enforces a ±30% tolerance. Changes are saved to the database immediately."/>
 
       {user?.role === 'branch_sales' && (
@@ -196,7 +197,7 @@ export default function CollaborationSuite() {
               Good morning, {user?.name?.split(' ')[0]} 👋
             </div>
             <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.75)', marginTop: 3 }}>
-              The May 2026 forecast has been finalized for {user?.branch}. Please review your AI forecast and submit any overrides by 20-May-2026.
+              The Jun 2026 forecast has been finalized for {user?.branch}. Please review your AI forecast and submit any overrides by 20-Jun-2026.
             </div>
           </div>
         </div>

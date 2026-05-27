@@ -118,6 +118,7 @@ const downloadCSV = (rows, filename) => {
 
 /* ═══════════════════════════════════════════════════════ */
 export default function ForecastWorkbench() {
+  useEffect(() => { document.title = 'WhirlCast — Forecast Workbench'; }, []);
   const { toast } = useToast();
 
   /* Top filter bar */

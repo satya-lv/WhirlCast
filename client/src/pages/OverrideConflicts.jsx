@@ -99,6 +99,7 @@ function MultiSelectDropdown({ label, options, selected, onChange }) {
 }
 
 export default function OverrideConflicts() {
+  useEffect(() => { document.title = 'WhirlCast — Override Conflicts'; }, []);
   const { toast }  = useToast();
   const { user }   = useAuth();
   const isMobile   = useIsMobile();
@@ -147,7 +148,7 @@ export default function OverrideConflicts() {
     setSigningOff(true);
     try {
       await fetch('/api/cycles/signoff', { method: 'POST' });
-      toast.success('May 2026 forecast signed off successfully');
+      toast.success('Jun 2026 forecast signed off successfully');
       setSignedOff(true);
       setShowSignoffModal(false);
     } catch { toast.error('Sign-off failed'); }
@@ -229,7 +230,7 @@ export default function OverrideConflicts() {
   return (
     <div style={{ padding: isMobile ? '16px' : '24px', maxWidth:1440, margin:'0 auto', background:'var(--bg)', minHeight:'calc(100vh - 52px)', paddingBottom: isMobile ? 80 : undefined }}>
       <PageHeader title="Override Conflicts"
-        subtitle="Review and resolve branch forecast overrides — May 2026"
+        subtitle="Review and resolve branch forecast overrides — Jun 2026"
         helpText="The category team reviews all branch overrides nationally. Resolve conflicts by accepting, rejecting, or setting a custom value. All decisions are final."/>
 
       {isReadOnly && (
@@ -245,7 +246,7 @@ export default function OverrideConflicts() {
           <div style={{ flex:1 }}>
             <div style={{ fontSize:15, fontWeight:700, color:'white' }}>Good morning, {user?.name?.split(' ')[0]} 👋</div>
             <div style={{ fontSize:12, color:'rgba(255,255,255,0.75)', marginTop:3 }}>
-              {overrides.filter(o => !o.final_override && Math.abs(o.deviation) > 20).length || 3} override conflicts require your attention for the May 2026 cycle.
+              {overrides.filter(o => !o.final_override && Math.abs(o.deviation) > 20).length || 3} override conflicts require your attention for the Jun 2026 cycle.
             </div>
           </div>
         </div>
@@ -605,7 +606,7 @@ export default function OverrideConflicts() {
                   </button>
                 )}
                 {canResolve && signedOff && (
-                  <span style={{ fontSize:13, color:'#16A34A', fontWeight:600, marginLeft:'auto' }}>✅ May 2026 Signed Off</span>
+                  <span style={{ fontSize:13, color:'#16A34A', fontWeight:600, marginLeft:'auto' }}>✅ Jun 2026 Signed Off</span>
                 )}
               </div>
             </div>
@@ -621,7 +622,7 @@ export default function OverrideConflicts() {
             onClick={e => e.stopPropagation()}>
             <div style={{ fontSize:15, fontWeight:700, color:'var(--text-1)', marginBottom:10 }}>Submit for Sign-off?</div>
             <div style={{ fontSize:13, color:'var(--text-2)', lineHeight:1.6, marginBottom:22 }}>
-              Submit May 2026 forecast for final sign-off? All conflicts resolved. This action is final.
+              Submit Jun 2026 forecast for final sign-off? All conflicts resolved. This action is final.
             </div>
             <div style={{ display:'flex', gap:10 }}>
               <button onClick={() => setShowSignoffModal(false)} style={{ flex:1, background:'var(--bg)', border:'0.5px solid var(--border)', borderRadius:8, padding:'10px', cursor:'pointer', fontSize:13 }}>Cancel</button>

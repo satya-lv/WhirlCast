@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useIsMobile } from '../utils/useIsMobile';
@@ -58,6 +58,7 @@ const users = {
 };
 
 export default function Login() {
+  useEffect(() => { document.title = 'WhirlCast — Login'; }, []);
   const { login } = useAuth();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
@@ -79,7 +80,7 @@ export default function Login() {
   const handleReset = async () => {
     setResetting(true);
     try {
-      const res = await fetch('http://localhost:3001/api/demo/reset', { method: 'POST' });
+      const res = await fetch('/api/demo/reset', { method: 'POST' });
       const data = await res.json();
       if (data.success) {
         alert('Demo reset — ready for walkthrough');

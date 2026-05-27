@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { PageHeader } from '../components/shared/PageHeader';
 import { useToast } from '../components/shared/Toast';
 import { ComposedChart, Area, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
@@ -48,6 +48,7 @@ const LOOKALIKE_LINES = ['Recommended', 'Conservative', 'Optimistic'];
 const LINE_COLORS_NPI = { Recommended:'#E31837', Conservative:'#3B82F6', Optimistic:'#16A34A' };
 
 export default function NPIForecasting() {
+  useEffect(() => { document.title = 'WhirlCast — NPI Forecasting'; }, []);
   const { toast } = useToast();
   const [form, setForm] = useState({
     sku: '', category: CATEGORIES[0], segment: '', price: '', launch: '', branches: [...BRANCHES],
@@ -71,7 +72,7 @@ export default function NPIForecasting() {
   };
 
   const handleSave = () => {
-    toast(`✅ Look-alike Blend forecast saved for ${form.sku} — added to May 2026 cycle`, 'success');
+    toast(`✅ Look-alike Blend forecast saved for ${form.sku} — added to Jun 2026 cycle`, 'success');
   };
 
   const chartData = results
