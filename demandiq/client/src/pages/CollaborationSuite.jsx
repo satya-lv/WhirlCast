@@ -268,10 +268,10 @@ export default function CollaborationSuite() {
           {loading ? (
             <div style={{ padding:40, textAlign:'center', color:'var(--text-2)', fontSize:13 }}>Loading branch data…</div>
           ) : (
-            <div style={{ overflowX:'auto' }}>
+            <div style={{ overflowX:'auto', overflowY:'auto', maxHeight:460 }}>
               <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth: showBranchCol ? 980 : 900 }}>
                 <thead>
-                  <tr style={{ background:'#F8FAFF' }}>
+                  <tr style={{ background:'#F8FAFF', position:'sticky', top:0, zIndex:1 }}>
                     {[
                       ...(showBranchCol ? ['Branch'] : []),
                       'SKU','Category','Last 6M Actual','AI Forecast (6M)',
