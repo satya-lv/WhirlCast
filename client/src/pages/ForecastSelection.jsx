@@ -80,6 +80,12 @@ export default function ForecastSelection() {
   const [compSku,     setCompSku]     = useState([]);
   const [compCat,     setCompCat]     = useState('All');
 
+  /* Chart-level filters */
+  const [trendScenFilter,  setTrendScenFilter]  = useState([]);
+  const [trendTimeRange,   setTrendTimeRange]   = useState('All');
+  const [accScenFilter,    setAccScenFilter]    = useState([]);
+  const [accTimeRange,     setAccTimeRange]     = useState('All');
+
   /* Finalize */
   const [finalizing,     setFinalizing]     = useState(false);
   const [finalScenario,  setFinalScenario]  = useState('');
@@ -397,45 +403,101 @@ export default function ForecastSelection() {
 
               {/* Trend chart */}
               <div style={{ background:'var(--card)', borderRadius:'var(--radius-md)', padding:'20px', boxShadow:'var(--shadow-sm)', border:'0.5px solid var(--border)' }}>
-                <h3 style={{ margin:'0 0 14px', fontSize:14, fontWeight:600 }}>Forecast Trend Comparison</h3>
-                <ResponsiveContainer width="100%" height={250}>
-                  <ComposedChart data={chartData} margin={{top:5,right:20,left:0,bottom:5}}>
-                    <defs>
-                      {sc.map((s,si) => (
-                        <linearGradient key={s.scenario_id} id={`scG${si}`} x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%"  stopColor={LINE_COLORS[si]} stopOpacity={0.15}/>
-                          <stop offset="95%" stopColor={LINE_COLORS[si]} stopOpacity={0}/>
-                        </linearGradient>
-                      ))}
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)"/>
-                    <XAxis dataKey="month" tick={{fontSize:11,fill:'var(--text-2)'}}/>
-                    <YAxis tick={{fontSize:11,fill:'var(--text-2)'}} tickFormatter={v=>(v/1000).toFixed(0)+'k'}/>
-                    <Tooltip content={<CustomTooltip/>}/>
-                    <Legend/>
-                    {sc.map((s,si) => (
-                      <Area key={s.scenario_id} type="monotone" dataKey={s.name} stroke={LINE_COLORS[si]} strokeWidth={2} fill={`url(#scG${si})`} dot={false} isAnimationActive={true} animationDuration={800} strokeDasharray={si>0?'5 3':'none'}/>
+                {/* Filter bar */}
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10, flexWrap:'wrap', gap:8 }}>
+                  <h3 style={{ margin:0, fontSize:14, fontWeight:600 }}>Forecast Trend Comparison</h3>
+                  <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                    <MultiSelectDropdown label="Scenarios" options={sc.map(s=>s.name)} selected={trendScenFilter} onChange={setTrendScenFilter}/>
+                    <select value={trendTimeRange} onChange={e => setTrendTimeRange(e.target.value)}
+                      style={{ padding:'5px 8px', border:'0.5px solid var(--border)', borderRadius:7, fontSize:11, color:'var(--text-1)', background:'var(--card)', fontFamily:'Inter', outline:'none' }}>
+                      <option value="All">All Months</option>
+                      <option value="3M">Last 3M</option>
+                      <option value="6M">Last 6M</option>
+                    </select>
+                  </div>
+                </div>
+                {/* Scenario pills */}
+                {trendScenFilter.length > 0 && trendScenFilter.length < sc.length && (
+                  <div style={{ display:'flex', flexWrap:'wrap', gap:5, marginBottom:8 }}>
+                    {trendScenFilter.map((name, i) => (
+                      <span key={name} style={{ background:`${LINE_COLORS[sc.findIndex(s=>s.name===name)%LINE_COLORS.length]}18`, color:LINE_COLORS[sc.findIndex(s=>s.name===name)%LINE_COLORS.length], border:`1px solid ${LINE_COLORS[sc.findIndex(s=>s.name===name)%LINE_COLORS.length]}40`, borderRadius:12, padding:'2px 8px', fontSize:10, fontWeight:600, display:'flex', alignItems:'center', gap:4 }}>
+                        {name} <button onClick={() => setTrendScenFilter(v=>v.filter(n=>n!==name))} style={{ background:'none', border:'none', cursor:'pointer', padding:0, lineHeight:1, fontSize:13 }}>×</button>
+                      </span>
                     ))}
-                  </ComposedChart>
+                  </div>
+                )}
+                <ResponsiveContainer width="100%" height={250}>
+                  {(() => {
+                    const activeSc = trendScenFilter.length ? sc.filter(s => trendScenFilter.includes(s.name)) : sc;
+                    const n = trendTimeRange === '3M' ? 3 : trendTimeRange === '6M' ? 6 : chartData.length;
+                    const filteredData = chartData.slice(-n);
+                    return (
+                      <ComposedChart data={filteredData} margin={{top:5,right:20,left:0,bottom:5}}>
+                        <defs>
+                          {activeSc.map((s,si) => (
+                            <linearGradient key={s.scenario_id} id={`scG${si}`} x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%"  stopColor={LINE_COLORS[si]} stopOpacity={0.15}/>
+                              <stop offset="95%" stopColor={LINE_COLORS[si]} stopOpacity={0}/>
+                            </linearGradient>
+                          ))}
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)"/>
+                        <XAxis dataKey="month" tick={{fontSize:11,fill:'var(--text-2)'}}/>
+                        <YAxis tick={{fontSize:11,fill:'var(--text-2)'}} tickFormatter={v=>(v/1000).toFixed(0)+'k'}/>
+                        <Tooltip content={<CustomTooltip/>}/>
+                        <Legend/>
+                        {activeSc.map((s,si) => (
+                          <Area key={s.scenario_id} type="monotone" dataKey={s.name} stroke={LINE_COLORS[si]} strokeWidth={2} fill={`url(#scG${si})`} dot={false} isAnimationActive={true} animationDuration={800} strokeDasharray={si>0?'5 3':'none'}/>
+                        ))}
+                      </ComposedChart>
+                    );
+                  })()}
                 </ResponsiveContainer>
               </div>
 
               {/* Accuracy & Bias trend */}
               {comparison.trendData && (
                 <div style={{ background:'var(--card)', borderRadius:'var(--radius-md)', padding:'20px', boxShadow:'var(--shadow-sm)', border:'0.5px solid var(--border)' }}>
-                  <h3 style={{ margin:'0 0 14px', fontSize:14, fontWeight:600 }}>Accuracy & Bias Trend</h3>
+                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10, flexWrap:'wrap', gap:8 }}>
+                    <h3 style={{ margin:0, fontSize:14, fontWeight:600 }}>Accuracy & Bias Trend</h3>
+                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                      <MultiSelectDropdown label="Scenarios" options={sc.map(s=>s.name)} selected={accScenFilter} onChange={setAccScenFilter}/>
+                      <select value={accTimeRange} onChange={e => setAccTimeRange(e.target.value)}
+                        style={{ padding:'5px 8px', border:'0.5px solid var(--border)', borderRadius:7, fontSize:11, color:'var(--text-1)', background:'var(--card)', fontFamily:'Inter', outline:'none' }}>
+                        <option value="All">All Months</option>
+                        <option value="3M">Last 3M</option>
+                        <option value="6M">Last 6M</option>
+                      </select>
+                    </div>
+                  </div>
+                  {accScenFilter.length > 0 && accScenFilter.length < sc.length && (
+                    <div style={{ display:'flex', flexWrap:'wrap', gap:5, marginBottom:8 }}>
+                      {accScenFilter.map((name) => (
+                        <span key={name} style={{ background:'#EFF6FF', color:'#1B3A6B', border:'1px solid #BFDBFE', borderRadius:12, padding:'2px 8px', fontSize:10, fontWeight:600, display:'flex', alignItems:'center', gap:4 }}>
+                          {name} <button onClick={() => setAccScenFilter(v=>v.filter(n=>n!==name))} style={{ background:'none', border:'none', cursor:'pointer', padding:0, lineHeight:1, fontSize:13 }}>×</button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   <ResponsiveContainer width="100%" height={180}>
-                    <ComposedChart data={comparison.trendData} margin={{top:5,right:20,left:0,bottom:5}}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)"/>
-                      <XAxis dataKey="month" tick={{fontSize:10,fill:'var(--text-2)'}} tickFormatter={m=>m.replace('-2026',"'26")}/>
-                      <YAxis tick={{fontSize:10,fill:'var(--text-2)'}}/>
-                      <Tooltip content={<CustomTooltip/>}/>
-                      <Legend/>
-                      {sc.map((s,si) => [
-                        <Area key={`a${si}`} type="monotone" dataKey={`accuracy_s${si+1}`} name={`Acc ${s.name}`} stroke={LINE_COLORS[si]} strokeWidth={2} fill="none" dot={false}/>,
-                        <Area key={`b${si}`} type="monotone" dataKey={`bias_s${si+1}`} name={`Bias ${s.name}`} stroke={LINE_COLORS[si]} strokeWidth={1.5} strokeDasharray="3 3" fill="none" dot={false}/>,
-                      ])}
-                    </ComposedChart>
+                    {(() => {
+                      const activeSc2 = accScenFilter.length ? sc.filter(s => accScenFilter.includes(s.name)) : sc;
+                      const allTD = comparison.trendData;
+                      const n2 = accTimeRange === '3M' ? 3 : accTimeRange === '6M' ? 6 : allTD.length;
+                      return (
+                        <ComposedChart data={allTD.slice(-n2)} margin={{top:5,right:20,left:0,bottom:5}}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)"/>
+                          <XAxis dataKey="month" tick={{fontSize:10,fill:'var(--text-2)'}} tickFormatter={m=>m.replace('-2026',"'26")}/>
+                          <YAxis tick={{fontSize:10,fill:'var(--text-2)'}}/>
+                          <Tooltip content={<CustomTooltip/>}/>
+                          <Legend/>
+                          {activeSc2.map((s,si) => [
+                            <Area key={`a${si}`} type="monotone" dataKey={`accuracy_s${si+1}`} name={`Acc ${s.name}`} stroke={LINE_COLORS[si]} strokeWidth={2} fill="none" dot={false}/>,
+                            <Area key={`b${si}`} type="monotone" dataKey={`bias_s${si+1}`} name={`Bias ${s.name}`} stroke={LINE_COLORS[si]} strokeWidth={1.5} strokeDasharray="3 3" fill="none" dot={false}/>,
+                          ])}
+                        </ComposedChart>
+                      );
+                    })()}
                   </ResponsiveContainer>
                 </div>
               )}

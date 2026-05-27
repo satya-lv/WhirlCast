@@ -149,9 +149,10 @@ export default function ForecastWorkbench() {
   /* Output view */
   const [view, setView] = useState('chart');
 
-  /* Chart line selector */
+  /* Chart line selector + time range */
   const [showLineMenu,    setShowLineMenu]    = useState(false);
   const [selectedLines,   setSelectedLines]   = useState(null); // null = auto top-3
+  const [chartTimeRange,  setChartTimeRange]  = useState('All');
 
   /* Save scenario */
   const [showParamModal, setShowParamModal] = useState(false);
@@ -203,12 +204,19 @@ export default function ForecastWorkbench() {
   const top3 = allLineKeys.slice(0,3);
   const activeLines = selectedLines || top3;
 
+  const RANGE_MONTHS = {
+    '3M': ["Sep'26","Oct'26","Nov'26"],
+    '6M': ["Jun'26","Jul'26","Aug'26","Sep'26","Oct'26","Nov'26"],
+    'All': [],
+  };
+
   const chartData = result ? (() => {
     const grouped = {};
     result.forEach(r => {
       const key = `${r.sku} — ${r.branch}`;
       if (!activeLines.includes(key)) return;
       const lbl = r.month.replace('-2026',"'26").replace('-2025',"'25");
+      if (chartTimeRange !== 'All' && !RANGE_MONTHS[chartTimeRange].includes(lbl)) return;
       if (!grouped[lbl]) grouped[lbl] = { month:lbl };
       grouped[lbl][key] = (grouped[lbl][key]||0) + r.value;
     });
@@ -467,35 +475,54 @@ export default function ForecastWorkbench() {
                 {/* Chart with line selector */}
                 {view === 'chart' && (
                   <>
-                    {/* Compare SKUs selector */}
-                    <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12, position:'relative' }}>
-                      <span style={{ fontSize:12, fontWeight:500, color:'var(--text-2)' }}>Compare:</span>
-                      <div style={{ position:'relative' }}>
-                        <button onClick={() => setShowLineMenu(v => !v)} style={{ background:'var(--bg)', border:'0.5px solid var(--border)', borderRadius:7, padding:'5px 10px', fontSize:11, cursor:'pointer', display:'flex', alignItems:'center', gap:6, color:'var(--text-1)' }}>
-                          {activeLines.length} line{activeLines.length!==1?'s':''} selected ▾
-                        </button>
-                        {showLineMenu && (
-                          <div style={{ position:'absolute', top:'calc(100% + 4px)', left:0, zIndex:50, background:'var(--card)', border:'0.5px solid var(--border)', borderRadius:8, boxShadow:'var(--shadow-md)', padding:'8px 0', minWidth:260, maxHeight:240, overflowY:'auto' }}>
-                            {allLineKeys.map((key,i) => (
-                              <label key={key} style={{ display:'flex', alignItems:'center', gap:8, padding:'5px 12px', cursor:'pointer', fontSize:12, color:'var(--text-1)' }}
-                                onMouseEnter={e => e.currentTarget.style.background='#F5F8FF'}
-                                onMouseLeave={e => e.currentTarget.style.background=''}>
-                                <input type="checkbox" checked={activeLines.includes(key)}
-                                  onChange={e => {
-                                    const cur = selectedLines || top3;
-                                    setSelectedLines(e.target.checked ? [...cur,key] : cur.filter(k=>k!==key));
-                                  }}
-                                  style={{ accentColor:LINE_COLORS[i%LINE_COLORS.length], cursor:'pointer' }}/>
-                                <span style={{ width:10, height:10, borderRadius:'50%', background:LINE_COLORS[i%LINE_COLORS.length], flexShrink:0 }}/>
-                                {key}
-                              </label>
-                            ))}
-                          </div>
-                        )}
+                    {/* Filter bar */}
+                    <div style={{ background:'#F8FAFF', borderRadius:8, padding:'10px 14px', marginBottom:10, display:'flex', alignItems:'center', gap:14, flexWrap:'wrap', border:'0.5px solid var(--border)' }}>
+                      <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+                        <span style={{ fontSize:10, fontWeight:600, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:'0.04em' }}>SKU / Branch</span>
+                        <div style={{ position:'relative' }}>
+                          <button onClick={() => setShowLineMenu(v => !v)} style={{ background:'var(--card)', border:'0.5px solid var(--border)', borderRadius:7, padding:'5px 10px', fontSize:11, cursor:'pointer', display:'flex', alignItems:'center', gap:6, color:'var(--text-1)' }}>
+                            {activeLines.length} line{activeLines.length!==1?'s':''} selected ▾
+                          </button>
+                          {showLineMenu && (
+                            <div style={{ position:'absolute', top:'calc(100% + 4px)', left:0, zIndex:50, background:'var(--card)', border:'0.5px solid var(--border)', borderRadius:8, boxShadow:'var(--shadow-md)', padding:'8px 0', minWidth:260, maxHeight:240, overflowY:'auto' }}>
+                              {allLineKeys.map((key,i) => (
+                                <label key={key} style={{ display:'flex', alignItems:'center', gap:8, padding:'5px 12px', cursor:'pointer', fontSize:12, color:'var(--text-1)' }}
+                                  onMouseEnter={e => e.currentTarget.style.background='#F5F8FF'}
+                                  onMouseLeave={e => e.currentTarget.style.background=''}>
+                                  <input type="checkbox" checked={activeLines.includes(key)}
+                                    onChange={e => {
+                                      const cur = selectedLines || top3;
+                                      setSelectedLines(e.target.checked ? [...cur,key] : cur.filter(k=>k!==key));
+                                    }}
+                                    style={{ accentColor:LINE_COLORS[i%LINE_COLORS.length], cursor:'pointer' }}/>
+                                  <span style={{ width:10, height:10, borderRadius:'50%', background:LINE_COLORS[i%LINE_COLORS.length], flexShrink:0 }}/>
+                                  {key}
+                                </label>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                      {activeLines.map((k,i) => (
-                        <span key={k} style={{ fontSize:10, background:`${LINE_COLORS[allLineKeys.indexOf(k)%LINE_COLORS.length]}18`, color:LINE_COLORS[allLineKeys.indexOf(k)%LINE_COLORS.length], border:`1px solid ${LINE_COLORS[allLineKeys.indexOf(k)%LINE_COLORS.length]}40`, borderRadius:12, padding:'2px 8px', fontWeight:600 }}>{k}</span>
-                      ))}
+                      <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+                        <span style={{ fontSize:10, fontWeight:600, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:'0.04em' }}>Time Range</span>
+                        <select value={chartTimeRange} onChange={e => setChartTimeRange(e.target.value)} style={{ padding:'5px 8px', border:'0.5px solid var(--border)', borderRadius:7, fontSize:11, color:'var(--text-1)', background:'var(--card)', fontFamily:'Inter', outline:'none' }}>
+                          <option value="All">Jun–Nov 2026 (All)</option>
+                          <option value="6M">Last 6M</option>
+                          <option value="3M">Last 3M (Sep–Nov)</option>
+                        </select>
+                      </div>
+                    </div>
+                    {/* Active line pills */}
+                    <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginBottom:10 }}>
+                      {activeLines.map((k,i) => {
+                        const c = LINE_COLORS[allLineKeys.indexOf(k)%LINE_COLORS.length];
+                        return (
+                          <span key={k} style={{ fontSize:10, background:`${c}18`, color:c, border:`1px solid ${c}40`, borderRadius:12, padding:'2px 8px', fontWeight:600, display:'flex', alignItems:'center', gap:4 }}>
+                            {k}
+                            <button onClick={() => { const cur = selectedLines || top3; setSelectedLines(cur.filter(l=>l!==k)); }} style={{ background:'none', border:'none', cursor:'pointer', padding:0, color:c, lineHeight:1, fontSize:13, fontFamily:'Inter' }}>×</button>
+                          </span>
+                        );
+                      })}
                     </div>
                     <ResponsiveContainer width="100%" height={280}>
                       <ComposedChart data={chartData} margin={{ top:5, right:20, left:0, bottom:5 }}>

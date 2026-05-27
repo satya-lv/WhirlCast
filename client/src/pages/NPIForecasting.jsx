@@ -43,17 +43,25 @@ const RESULTS = {
   },
 };
 
+const REQUIRED_FIELDS = ['sku', 'category', 'price', 'launch'];
+const LOOKALIKE_LINES = ['Recommended', 'Conservative', 'Optimistic'];
+const LINE_COLORS_NPI = { Recommended:'#E31837', Conservative:'#3B82F6', Optimistic:'#16A34A' };
+
 export default function NPIForecasting() {
   const { toast } = useToast();
   const [form, setForm] = useState({
     sku: '', category: CATEGORIES[0], segment: '', price: '', launch: '', branches: [...BRANCHES],
   });
-  const [loading, setLoading]   = useState(false);
-  const [results, setResults]   = useState(null);
-  const [selected, setSelected] = useState('recommended');
+  const [loading, setLoading]         = useState(false);
+  const [results, setResults]         = useState(null);
+  const [selected, setSelected]       = useState('recommended');
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [chartLines, setChartLines]   = useState([...LOOKALIKE_LINES]);
 
   const handleGenerate = async () => {
-    if (!form.sku || !form.price) { toast('Please fill in SKU Code and Price Point', 'warning'); return; }
+    setSubmitAttempted(true);
+    const missing = REQUIRED_FIELDS.filter(f => !form[f]);
+    if (missing.length) { toast('Please fill in all required fields', 'warning'); return; }
     setLoading(true);
     await new Promise(r => setTimeout(r, 2000));
     setResults(RESULTS);
@@ -95,20 +103,24 @@ export default function NPIForecasting() {
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 16, marginBottom: 16 }}>
           {[
-            { key: 'sku',     label: 'New SKU Code',     placeholder: 'e.g. REF_225L_DC_2026' },
-            { key: 'segment', label: 'Segment / Size',   placeholder: 'e.g. 225L' },
-            { key: 'price',   label: 'Price Point (₹)',  placeholder: 'e.g. 14500' },
+            { key: 'sku',     label: 'New SKU Code',     placeholder: 'e.g. REF_225L_DC_2026', required: true },
+            { key: 'segment', label: 'Segment / Size',   placeholder: 'e.g. 225L',             required: false },
+            { key: 'price',   label: 'Price Point (₹)',  placeholder: 'e.g. 14500',            required: true },
           ].map(f => (
             <div key={f.key}>
               <label style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.5px',
                 textTransform: 'uppercase', color: 'var(--text-2)', display: 'block', marginBottom: 6 }}>
-                {f.label}
+                {f.label}{f.required && <span style={{ color:'#DC2626', marginLeft:2 }}>*</span>}
               </label>
               <input value={form[f.key]} onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}
                 placeholder={f.placeholder}
-                style={{ width: '100%', padding: '10px 12px', border: '0.5px solid var(--border)',
+                style={{ width: '100%', padding: '10px 12px',
+                  border: `0.5px solid ${submitAttempted && f.required && !form[f.key] ? '#DC2626' : 'var(--border)'}`,
                   borderRadius: 10, fontSize: 13, background: 'var(--bg)', color: 'var(--text-1)',
                   outline: 'none' }}/>
+              {submitAttempted && f.required && !form[f.key] && (
+                <span style={{ color:'#DC2626', fontSize:10, marginTop:3, display:'block' }}>Required</span>
+              )}
             </div>
           ))}
         </div>
@@ -117,7 +129,7 @@ export default function NPIForecasting() {
           <div>
             <label style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.5px',
               textTransform: 'uppercase', color: 'var(--text-2)', display: 'block', marginBottom: 6 }}>
-              Category
+              Category<span style={{ color:'#DC2626', marginLeft:2 }}>*</span>
             </label>
             <select value={form.category} onChange={e => setForm(p => ({ ...p, category: e.target.value }))}
               style={{ width: '100%', padding: '10px 12px', border: '0.5px solid var(--border)',
@@ -128,11 +140,15 @@ export default function NPIForecasting() {
           <div>
             <label style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.5px',
               textTransform: 'uppercase', color: 'var(--text-2)', display: 'block', marginBottom: 6 }}>
-              Expected Launch Date
+              Expected Launch Date<span style={{ color:'#DC2626', marginLeft:2 }}>*</span>
             </label>
             <input type="date" value={form.launch} onChange={e => setForm(p => ({ ...p, launch: e.target.value }))}
-              style={{ width: '100%', padding: '10px 12px', border: '0.5px solid var(--border)',
+              style={{ width: '100%', padding: '10px 12px',
+                border: `0.5px solid ${submitAttempted && !form.launch ? '#DC2626' : 'var(--border)'}`,
                 borderRadius: 10, fontSize: 13, background: 'var(--bg)', color: 'var(--text-1)' }}/>
+            {submitAttempted && !form.launch && (
+              <span style={{ color:'#DC2626', fontSize:10, marginTop:3, display:'block' }}>Required</span>
+            )}
           </div>
           <div>
             <label style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.5px',
@@ -246,8 +262,28 @@ export default function NPIForecasting() {
 
           {/* Comparison Chart */}
           <div style={{ marginBottom: 20 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)', marginBottom: 14 }}>
-              Ramp Trajectory — All 3 Views
+            {/* Filter bar */}
+            <div style={{ background:'#F8FAFF', borderRadius:8, padding:'10px 14px', marginBottom:10, display:'flex', alignItems:'center', gap:14, flexWrap:'wrap', border:'0.5px solid var(--border)' }}>
+              <span style={{ fontSize:12, fontWeight:700, color:'var(--text-1)' }}>Ramp Trajectory — All 3 Views</span>
+              <span style={{ fontSize:11, color:'var(--text-3)' }}>Show:</span>
+              {LOOKALIKE_LINES.map(line => (
+                <label key={line} style={{ display:'flex', alignItems:'center', gap:5, cursor:'pointer', fontSize:12, color:'var(--text-1)' }}>
+                  <input type="checkbox" checked={chartLines.includes(line)}
+                    onChange={e => setChartLines(v => e.target.checked ? [...v,line] : v.filter(l=>l!==line))}
+                    style={{ accentColor:LINE_COLORS_NPI[line], cursor:'pointer' }}/>
+                  <span style={{ width:10, height:10, borderRadius:'50%', background:LINE_COLORS_NPI[line], display:'inline-block', flexShrink:0 }}/>
+                  {line}
+                </label>
+              ))}
+            </div>
+            {/* Active pills */}
+            <div style={{ display:'flex', flexWrap:'wrap', gap:5, marginBottom:8 }}>
+              {chartLines.map(line => (
+                <span key={line} style={{ background:`${LINE_COLORS_NPI[line]}18`, color:LINE_COLORS_NPI[line], border:`1px solid ${LINE_COLORS_NPI[line]}40`, borderRadius:12, padding:'2px 8px', fontSize:10, fontWeight:600, display:'flex', alignItems:'center', gap:4 }}>
+                  {line}
+                  <button onClick={() => setChartLines(v => v.filter(l=>l!==line))} style={{ background:'none', border:'none', cursor:'pointer', padding:0, lineHeight:1, fontSize:13, color:LINE_COLORS_NPI[line] }}>×</button>
+                </span>
+              ))}
             </div>
             <div style={{ height: 200 }}>
               <ResponsiveContainer width="100%" height="100%">
@@ -263,14 +299,13 @@ export default function NPIForecasting() {
                     </linearGradient>
                   </defs>
                   <XAxis dataKey="month" tick={{ fontSize: 11, fill: 'var(--text-2)' }}/>
-                  <YAxis tick={{ fontSize: 11, fill: 'var(--text-2)' }}
-                    tickFormatter={v => v.toLocaleString('en-IN')}/>
+                  <YAxis tick={{ fontSize: 11, fill: 'var(--text-2)' }} tickFormatter={v => v.toLocaleString('en-IN')}/>
                   <Tooltip formatter={(v, n) => [v.toLocaleString('en-IN') + ' units', n]}
                     contentStyle={{ borderRadius: 10, fontSize: 12, border: '0.5px solid var(--border)' }}/>
                   <Legend wrapperStyle={{ fontSize: 12 }}/>
-                  <Area type="monotone" dataKey="Recommended"  name="Recommended"  stroke="#E31837" strokeWidth={2.5} fill="url(#npiGradRed)"  dot={false}/>
-                  <Area type="monotone" dataKey="Conservative" name="Conservative" stroke="#3B82F6" strokeWidth={2}   fill="url(#npiGradBlue)" dot={false} strokeDasharray="6 3"/>
-                  <Line type="monotone" dataKey="Optimistic"   name="Optimistic"   stroke="#16A34A" strokeWidth={2}   dot={false} strokeDasharray="3 3"/>
+                  {chartLines.includes('Recommended')  && <Area type="monotone" dataKey="Recommended"  name="Recommended"  stroke="#E31837" strokeWidth={2.5} fill="url(#npiGradRed)"  dot={false}/>}
+                  {chartLines.includes('Conservative') && <Area type="monotone" dataKey="Conservative" name="Conservative" stroke="#3B82F6" strokeWidth={2}   fill="url(#npiGradBlue)" dot={false} strokeDasharray="6 3"/>}
+                  {chartLines.includes('Optimistic')   && <Line type="monotone" dataKey="Optimistic"   name="Optimistic"   stroke="#16A34A" strokeWidth={2}   dot={false} strokeDasharray="3 3"/>}
                 </ComposedChart>
               </ResponsiveContainer>
             </div>

@@ -31,13 +31,12 @@ const CAT_COLORS = {
   'Microwave':                { bg:'FDF4FF', text:'7E22CE' },
   'Induction':                { bg:'FFF7ED', text:'9A3412' },
 };
+
 const CatBadge = ({ cat }) => {
   const c = CAT_COLORS[cat] || { bg:'F3F4F6', text:'374151' };
   return <span style={{ background:`#${c.bg}`, color:`#${c.text}`, fontSize:9, fontWeight:600, padding:'1px 6px', borderRadius:20 }}>{cat}</span>;
 };
 
-const MONTHS_FWD   = ['06-2026','07-2026','08-2026','09-2026','10-2026','11-2026'];
-const MONTH_LABELS = ["Jun'26","Jul'26","Aug'26","Sep'26","Oct'26","Nov'26"];
 const CAT_MAP = {
   'REF_190L_DirectCool':'Direct Cool Refrigerator', 'REF_240L_FrostFree':'Frost Free Refrigerator',
   'REF_340L_TripleDoor':'Frost Free Refrigerator',  'WM_7KG_TopLoad':'Washing Machine',
@@ -45,10 +44,19 @@ const CAT_MAP = {
   'AC_1.5T_Inverter':'Air Conditioner',             'AC_2.0T_Split':'Air Conditioner',
   'MW_25L_Convection':'Microwave',                  'IH_3B_SmartGlass':'Induction',
 };
-const BRANCH_ACC = {
-  'Mumbai':'91.0','New Delhi':'85.1','Kolkata':'81.0','Chennai':'79.4',
-  'Bangalore':'89.2','Hyderabad':'83.5','Pune':'88.0','Ahmedabad':'86.2',
+
+const BRANCH_STATS = {
+  'Mumbai':      { acc:'91.0', bias:'2.3' },
+  'New Delhi':   { acc:'85.1', bias:'6.9' },
+  'Kolkata':     { acc:'81.0', bias:'8.2' },
+  'Chennai':     { acc:'79.4', bias:'9.1' },
+  'Bangalore':   { acc:'89.2', bias:'3.4' },
+  'Hyderabad':   { acc:'83.5', bias:'5.8' },
+  'Pune':        { acc:'88.0', bias:'3.8' },
+  'Ahmedabad':   { acc:'86.2', bias:'4.5' },
 };
+
+const CATEGORIES = ['Direct Cool Refrigerator','Frost Free Refrigerator','Washing Machine','Air Conditioner','Microwave','Induction'];
 
 const CustomTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
@@ -59,6 +67,36 @@ const CustomTooltip = ({ active, payload, label }) => {
     </div>
   );
 };
+
+function MultiSelectDropdown({ label, options, selected, onChange }) {
+  const [open, setOpen] = useState(false);
+  const display = selected.length === 0 || selected.length === options.length ? `All ${label}` : `${selected.length} selected`;
+  return (
+    <div style={{ position:'relative' }}>
+      <button onClick={() => setOpen(o => !o)} style={{ background:'var(--card)', border:'0.5px solid var(--border)', borderRadius:7, padding:'5px 10px', fontSize:12, cursor:'pointer', color:'var(--text-1)', whiteSpace:'nowrap', display:'flex', alignItems:'center', gap:6 }}>
+        {display} ▾
+      </button>
+      {open && (
+        <div style={{ position:'absolute', top:'calc(100% + 4px)', left:0, zIndex:60, background:'var(--card)', border:'0.5px solid var(--border)', borderRadius:8, boxShadow:'0 4px 16px rgba(0,0,0,0.12)', padding:'6px 0', minWidth:260, maxHeight:240, overflowY:'auto' }}>
+          <label style={{ display:'flex', alignItems:'center', gap:8, padding:'5px 12px', cursor:'pointer', fontSize:12 }}
+            onMouseEnter={e => e.currentTarget.style.background='#F5F8FF'} onMouseLeave={e => e.currentTarget.style.background=''}>
+            <input type="checkbox" checked={selected.length===0||selected.length===options.length}
+              onChange={() => onChange([])} style={{ accentColor:'#1B3A6B', cursor:'pointer' }}/>
+            <em style={{ color:'var(--text-2)' }}>All Categories</em>
+          </label>
+          {options.map(opt => (
+            <label key={opt} style={{ display:'flex', alignItems:'center', gap:8, padding:'5px 12px', cursor:'pointer', fontSize:12 }}
+              onMouseEnter={e => e.currentTarget.style.background='#F5F8FF'} onMouseLeave={e => e.currentTarget.style.background=''}>
+              <input type="checkbox" checked={selected.includes(opt)} style={{ accentColor:'#1B3A6B', cursor:'pointer' }}
+                onChange={e => onChange(e.target.checked ? [...selected,opt] : selected.filter(s=>s!==opt))}/>
+              {opt}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function OverrideConflicts() {
   const { toast }  = useToast();
@@ -76,6 +114,7 @@ export default function OverrideConflicts() {
   const [reportData, setReportData]             = useState(null);
   const [expandedCats, setExpandedCats]         = useState({});
   const [expandedBranches, setExpandedBranches] = useState({});
+  const [filterCats, setFilterCats]             = useState([]);
 
   const isReadOnly  = user?.role === 'demand_planning';
   const canResolve  = user?.role === 'category_team';
@@ -118,47 +157,74 @@ export default function OverrideConflicts() {
   const overrides      = data?.overrides     || [];
   const categoryRollup = data?.categoryRollup || [];
   const allResolved    = !signedOff && overrides.length > 0 && overrides.every(o => o.final_override != null || o.status === 'resolved');
-  const filteredOverrides = filterBranch
-    ? overrides.filter(o => o.branch === filterBranch)
-    : overrides;
+  const filteredOverrides = filterBranch ? overrides.filter(o => o.branch === filterBranch) : overrides;
 
+  /* ── Category rows with topBranches for "Driven by" attribution ── */
   const catRows = (() => {
     const cats = categoryRollup.length
       ? categoryRollup.map(r => r.category)
       : [...new Set((reportData?.by_category||[]).map(r => r.category))];
     return cats.map(cat => {
-      const vals = MONTHS_FWD.map(m => (reportData?.by_category||[]).find(r => r.category===cat && r.month===m)?.value || 0);
-      const total = vals.reduce((s,v)=>s+v,0);
-      const cr = categoryRollup.find(r => r.category===cat);
-      return { cat, vals, total, aiTotal:cr?.ai_total||0, overrideTotal:cr?.override_total||0, deviation:cr?.deviation||0, status:cr?.status||'ok' };
+      const cr = categoryRollup.find(r => r.category === cat);
+      const catOvs = overrides.filter(o => CAT_MAP[o.sku] === cat);
+      const branchDev = {};
+      catOvs.forEach(o => { branchDev[o.branch] = (branchDev[o.branch]||0) + Math.abs(o.deviation||0); });
+      const topBranches = Object.entries(branchDev).sort((a,b) => b[1]-a[1]).slice(0,2).map(([b]) => b);
+      return {
+        cat,
+        aiTotal:       cr?.ai_total       || 0,
+        overrideTotal: cr?.override_total || 0,
+        deviation:     cr?.deviation      || 0,
+        status:        cr?.status         || 'ok',
+        topBranches,
+      };
     });
   })();
 
-  const getBranchRows = (cat) => {
-    const rows = (reportData?.by_branch_sku||[]).filter(r => CAT_MAP[r.sku]===cat);
-    const branches = [...new Set(rows.map(r => r.branch))];
+  /* ── Branch rows: only branches that have submitted overrides for that category ── */
+  const getBranchOverrideRows = (cat) => {
+    const catOvs = overrides.filter(o => CAT_MAP[o.sku] === cat);
+    const branches = [...new Set(catOvs.map(o => o.branch))];
     return branches.map(branch => {
-      const bRows = rows.filter(r => r.branch===branch);
-      const vals = MONTHS_FWD.map(m => bRows.filter(r => r.month===m).reduce((s,r)=>s+(r.value||0),0));
-      return { branch, vals, total:vals.reduce((s,v)=>s+v,0), acc:BRANCH_ACC[branch]||'—' };
-    });
+      const bOvs = catOvs.filter(o => o.branch === branch);
+      const aiTotal = (reportData?.by_branch_sku||[])
+        .filter(r => r.branch === branch && CAT_MAP[r.sku] === cat)
+        .reduce((s, r) => s + (r.value||0), 0);
+      const overriddenAI  = bOvs.reduce((s,o) => s + (o.ai_forecast||0), 0);
+      const overriddenVal = bOvs.reduce((s,o) => s + (o.override_value||0), 0);
+      const overrideTotal = aiTotal - overriddenAI + overriddenVal;
+      const deviation = aiTotal > 0 ? ((overrideTotal - aiTotal) / aiTotal * 100) : 0;
+      const skuDev = {};
+      bOvs.forEach(o => { skuDev[o.sku] = (skuDev[o.sku]||0) + Math.abs(o.deviation||0); });
+      const topSkus = Object.entries(skuDev).sort((a,b) => b[1]-a[1]).slice(0,2).map(([s]) => s);
+      const stats = BRANCH_STATS[branch] || { acc:'85.0', bias:'5.0' };
+      return { branch, aiTotal, overrideTotal, deviation, acc:stats.acc, bias:stats.bias, topSkus };
+    }).sort((a,b) => Math.abs(b.deviation) - Math.abs(a.deviation));
   };
 
-  const getSkuRows = (cat, branch) => {
-    const rows = (reportData?.by_branch_sku||[]).filter(r => CAT_MAP[r.sku]===cat && r.branch===branch);
-    const skus = [...new Set(rows.map(r => r.sku))];
+  /* ── SKU rows: individual overrides for a branch+category ── */
+  const getSkuOverrideRows = (cat, branch) => {
+    const skuOvs = overrides.filter(o => CAT_MAP[o.sku] === cat && o.branch === branch);
+    const skus = [...new Set(skuOvs.map(o => o.sku))];
     return skus.map(sku => {
-      const vals = MONTHS_FWD.map(m => rows.find(r => r.sku===sku && r.month===m)?.value||0);
-      const ov = overrides.find(o => o.sku===sku && o.branch===branch);
-      return { sku, vals, total:vals.reduce((s,v)=>s+v,0), overrideVal:ov?.final_override||ov?.override_value };
+      const sOvs = skuOvs.filter(o => o.sku === sku);
+      const aiTotal = sOvs.reduce((s,o) => s + (o.ai_forecast||0), 0);
+      const ovTotal = sOvs.reduce((s,o) => s + (o.override_value||0), 0);
+      const deviation = aiTotal > 0 ? ((ovTotal - aiTotal) / aiTotal * 100) : 0;
+      const last = sOvs[sOvs.length - 1];
+      return { sku, aiTotal, overrideVal:ovTotal, deviation, overrideBy:last?.override_by, reason:last?.reason, status:last?.status };
     });
   };
 
   const chartData = catRows.map(r => ({
-    category: r.cat.split(' ').slice(0,2).join(' '),
+    category: r.cat,
     'AI Forecast': r.aiTotal,
-    'After Overrides': r.overrideTotal || r.total,
+    'After Overrides': r.overrideTotal || r.aiTotal,
   }));
+
+  const filteredChartData = filterCats.length ? chartData.filter(d => filterCats.includes(d.category)) : chartData;
+
+  const devColor = (dev) => Math.abs(dev) < 10 ? '#16A34A' : Math.abs(dev) < 20 ? '#D97706' : '#DC2626';
 
   return (
     <div style={{ padding: isMobile ? '16px' : '24px', maxWidth:1440, margin:'0 auto', background:'var(--bg)', minHeight:'calc(100vh - 52px)', paddingBottom: isMobile ? 80 : undefined }}>
@@ -205,26 +271,27 @@ export default function OverrideConflicts() {
           {/* 3-level expandable tree */}
           <div style={{ background:'var(--card)', borderRadius:12, boxShadow:'var(--shadow-sm)', border:'0.5px solid var(--border)', overflow:'hidden', marginBottom:20 }}>
             <div style={{ overflowX:'auto' }}>
-              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth:900 }}>
+              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth:820 }}>
                 <thead>
                   <tr style={{ background:'#F8FAFF' }}>
-                    <th style={{ padding:'10px 12px', textAlign:'left', fontSize:11, fontWeight:600, color:'#6B7280', textTransform:'uppercase', borderBottom:'1px solid #E5E7EB', minWidth:190 }}>Category / Branch / SKU</th>
-                    {MONTH_LABELS.map(m => (
-                      <th key={m} style={{ padding:'10px 8px', textAlign:'right', fontSize:10, fontWeight:600, color:'#6B7280', textTransform:'uppercase', borderBottom:'1px solid #E5E7EB', whiteSpace:'nowrap' }}>{m}</th>
-                    ))}
-                    <th style={{ padding:'10px 10px', textAlign:'right', fontSize:10, fontWeight:600, color:'#6B7280', textTransform:'uppercase', borderBottom:'1px solid #E5E7EB' }}>Total</th>
-                    <th style={{ padding:'10px 10px', textAlign:'right', fontSize:10, fontWeight:600, color:'#6B7280', textTransform:'uppercase', borderBottom:'1px solid #E5E7EB' }}>Ref.</th>
-                    <th style={{ padding:'10px 10px', textAlign:'right', fontSize:10, fontWeight:600, color:'#6B7280', textTransform:'uppercase', borderBottom:'1px solid #E5E7EB' }}>Dev%</th>
-                    <th style={{ padding:'10px 10px', textAlign:'left', fontSize:10, fontWeight:600, color:'#6B7280', textTransform:'uppercase', borderBottom:'1px solid #E5E7EB' }}>Status</th>
+                    <th style={{ ...thS, textAlign:'left', minWidth:200 }}>Category / Branch / SKU</th>
+                    <th style={thS}>AI Forecast</th>
+                    <th style={thS}>After Overrides</th>
+                    <th style={thS}>Deviation %</th>
+                    <th style={thS}>Acc% / Override By</th>
+                    <th style={thS}>BIAS% / Reason</th>
+                    <th style={thS}>Status</th>
                   </tr>
                 </thead>
                 <tbody>
                   {catRows.map((cr, ci) => {
                     const catKey = cr.cat;
                     const isCatOpen = !!expandedCats[catKey];
-                    const brRows = isCatOpen ? getBranchRows(catKey) : [];
+                    const brRows = isCatOpen ? getBranchOverrideRows(catKey) : [];
+                    const dc = devColor(cr.deviation);
                     return (
                       <React.Fragment key={catKey}>
+                        {/* ── Level 1: Category ── */}
                         <tr
                           onClick={() => setExpandedCats(p => ({ ...p, [catKey]: !p[catKey] }))}
                           style={{ background: ci % 2 === 0 ? '#FFF' : '#FAFAFA', cursor:'pointer' }}
@@ -235,24 +302,37 @@ export default function OverrideConflicts() {
                             <span style={{ marginRight:6, fontSize:10 }}>{isCatOpen ? '▼' : '▶'}</span>
                             {catKey}
                           </td>
-                          {cr.vals.map((v, mi) => (
-                            <td key={mi} style={{ padding:'10px 8px', textAlign:'right' }}>{v ? v.toLocaleString('en-IN') : '—'}</td>
-                          ))}
-                          <td style={{ padding:'10px 10px', textAlign:'right', fontWeight:700 }}>{cr.total.toLocaleString('en-IN')}</td>
-                          <td style={{ padding:'10px 10px', textAlign:'right', color:'#6B7280' }}>{(cr.aiTotal||0).toLocaleString('en-IN')}</td>
-                          <td style={{ padding:'10px 10px', textAlign:'right', fontWeight:600, color: cr.deviation > 0 ? '#16A34A' : '#DC2626' }}>
-                            {cr.deviation > 0 ? '+' : ''}{cr.deviation?.toFixed(1)}%
+                          <td style={{ padding:'10px 12px', textAlign:'right', fontWeight:600 }}>
+                            {(cr.aiTotal||0).toLocaleString('en-IN')}
                           </td>
-                          <td style={{ padding:'10px 10px' }}>
-                            <span style={{ background: cr.status==='ok' ? '#F0FDF4' : '#FFFBEB', color: cr.status==='ok' ? '#16A34A' : '#D97706', borderRadius:12, padding:'2px 8px', fontSize:10, fontWeight:600 }}>
+                          <td style={{ padding:'10px 12px', textAlign:'right', fontWeight:600 }}>
+                            {(cr.overrideTotal||cr.aiTotal||0).toLocaleString('en-IN')}
+                          </td>
+                          <td style={{ padding:'10px 12px', textAlign:'right' }}>
+                            <span style={{ color:dc, fontWeight:600 }}>
+                              {cr.deviation > 0 ? '+' : ''}{cr.deviation?.toFixed(1)}%
+                            </span>
+                            {cr.topBranches.length > 0 && (
+                              <div style={{ fontSize:9, color:'#9CA3AF', marginTop:2, fontWeight:400, textAlign:'right' }}>
+                                Driven by: {cr.topBranches.join(', ')}
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding:'10px 12px', color:'#9CA3AF', textAlign:'center' }}>—</td>
+                          <td style={{ padding:'10px 12px', color:'#9CA3AF', textAlign:'center' }}>—</td>
+                          <td style={{ padding:'10px 12px' }}>
+                            <span style={{ background: cr.status==='ok' ? '#F0FDF4' : '#FFFBEB', color: cr.status==='ok' ? '#16A34A' : '#D97706', borderRadius:12, padding:'2px 8px', fontSize:10, fontWeight:600, whiteSpace:'nowrap' }}>
                               {cr.status==='ok' ? '✅ Within range' : '⚠ Watch'}
                             </span>
                           </td>
                         </tr>
+
+                        {/* ── Level 2: Branch ── */}
                         {isCatOpen && brRows.map(br => {
                           const brKey = `${catKey}__${br.branch}`;
                           const isBrOpen = !!expandedBranches[brKey];
-                          const skRows = isBrOpen ? getSkuRows(catKey, br.branch) : [];
+                          const skRows = isBrOpen ? getSkuOverrideRows(catKey, br.branch) : [];
+                          const bdc = devColor(br.deviation);
                           return (
                             <React.Fragment key={brKey}>
                               <tr
@@ -265,28 +345,68 @@ export default function OverrideConflicts() {
                                   <span style={{ marginRight:6, fontSize:9 }}>{isBrOpen ? '▼' : '▶'}</span>
                                   {br.branch}
                                 </td>
-                                {br.vals.map((v, mi) => (
-                                  <td key={mi} style={{ padding:'8px 8px', textAlign:'right', fontSize:11 }}>{v ? v.toLocaleString('en-IN') : '—'}</td>
-                                ))}
-                                <td style={{ padding:'8px 10px', textAlign:'right', fontWeight:600, fontSize:11 }}>{br.total.toLocaleString('en-IN')}</td>
-                                <td style={{ padding:'8px 10px', textAlign:'right', fontSize:11, color:'#6B7280' }}>{br.acc}%</td>
-                                <td colSpan={2} style={{ padding:'8px 10px', fontSize:10, color:'#9CA3AF' }}>Accuracy</td>
+                                <td style={{ padding:'8px 12px', textAlign:'right', fontSize:11 }}>
+                                  {(br.aiTotal||0).toLocaleString('en-IN')}
+                                </td>
+                                <td style={{ padding:'8px 12px', textAlign:'right', fontSize:11 }}>
+                                  {(br.overrideTotal||0).toLocaleString('en-IN')}
+                                </td>
+                                <td style={{ padding:'8px 12px', textAlign:'right', fontSize:11 }}>
+                                  <span style={{ color:bdc, fontWeight:600 }}>
+                                    {br.deviation > 0 ? '+' : ''}{br.deviation?.toFixed(1)}%
+                                  </span>
+                                  {br.topSkus.length > 0 && (
+                                    <div style={{ fontSize:9, color:'#9CA3AF', marginTop:2, fontWeight:400, textAlign:'right' }}>
+                                      Driven by: {br.topSkus.join(', ')}
+                                    </div>
+                                  )}
+                                </td>
+                                <td style={{ padding:'8px 12px', textAlign:'right', fontSize:11, color:'#374151' }}>
+                                  {br.acc}%
+                                </td>
+                                <td style={{ padding:'8px 12px', textAlign:'right', fontSize:11, color:'#374151' }}>
+                                  {br.bias}%
+                                </td>
+                                <td style={{ padding:'8px 12px', color:'#9CA3AF', textAlign:'center' }}>—</td>
                               </tr>
-                              {isBrOpen && skRows.map(sr => (
-                                <tr key={sr.sku} style={{ background:'#FAFBFF' }}>
-                                  <td style={{ padding:'7px 12px 7px 46px', color:'#6B7280', fontSize:11 }}>{sr.sku}</td>
-                                  {sr.vals.map((v, mi) => (
-                                    <td key={mi} style={{ padding:'7px 8px', textAlign:'right', color:'#6B7280', fontSize:11 }}>{v ? v.toLocaleString('en-IN') : '—'}</td>
-                                  ))}
-                                  <td style={{ padding:'7px 10px', textAlign:'right', fontSize:11, fontWeight:500 }}>{sr.total.toLocaleString('en-IN')}</td>
-                                  <td style={{ padding:'7px 10px', textAlign:'right', fontSize:11, color: sr.overrideVal ? '#E31837' : '#9CA3AF', fontWeight: sr.overrideVal ? 600 : 400 }}>
-                                    {sr.overrideVal ? sr.overrideVal.toLocaleString('en-IN') : '—'}
-                                  </td>
-                                  <td colSpan={2} style={{ padding:'7px 10px', fontSize:10, color:'#9CA3AF' }}>
-                                    {sr.overrideVal ? 'Override' : ''}
-                                  </td>
-                                </tr>
-                              ))}
+
+                              {/* ── Level 3: SKU ── */}
+                              {isBrOpen && skRows.map(sr => {
+                                const sdc = devColor(sr.deviation);
+                                return (
+                                  <tr key={sr.sku} style={{ background:'#FAFBFF' }}>
+                                    <td style={{ padding:'7px 12px 7px 46px', color:'#6B7280', fontSize:11, fontFamily:'monospace' }}>
+                                      {sr.sku}
+                                    </td>
+                                    <td style={{ padding:'7px 12px', textAlign:'right', fontSize:11, color:'#6B7280' }}>
+                                      {(sr.aiTotal||0).toLocaleString('en-IN')}
+                                    </td>
+                                    <td style={{ padding:'7px 12px', textAlign:'right', fontSize:11, color: sr.overrideVal ? '#E31837' : '#9CA3AF', fontWeight: sr.overrideVal ? 600 : 400 }}>
+                                      {sr.overrideVal ? sr.overrideVal.toLocaleString('en-IN') : '—'}
+                                    </td>
+                                    <td style={{ padding:'7px 12px', textAlign:'right', fontSize:11 }}>
+                                      {sr.overrideVal ? (
+                                        <span style={{ color:sdc, fontWeight:600, background:`${sdc}18`, borderRadius:8, padding:'2px 6px', fontSize:10 }}>
+                                          {sr.deviation > 0 ? '+' : ''}{sr.deviation?.toFixed(1)}%
+                                        </span>
+                                      ) : '—'}
+                                    </td>
+                                    <td style={{ padding:'7px 12px', fontSize:11, color:'#374151' }}>
+                                      {sr.overrideBy || '—'}
+                                    </td>
+                                    <td style={{ padding:'7px 12px', fontSize:10, color:'#9CA3AF', maxWidth:140, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={sr.reason}>
+                                      {sr.reason || '—'}
+                                    </td>
+                                    <td style={{ padding:'7px 12px' }}>
+                                      {sr.status ? (
+                                        <span style={{ background: sr.status==='resolved' ? '#F0FDF4' : '#FFFBEB', color: sr.status==='resolved' ? '#16A34A' : '#D97706', borderRadius:12, padding:'2px 6px', fontSize:10, fontWeight:600, whiteSpace:'nowrap' }}>
+                                          {sr.status==='resolved' ? '✅' : '⚠'} {sr.status}
+                                        </span>
+                                      ) : '—'}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
                             </React.Fragment>
                           );
                         })}
@@ -298,11 +418,31 @@ export default function OverrideConflicts() {
             </div>
           </div>
 
-          {/* Bar Chart — full width */}
+          {/* Bar Chart with category filter */}
           <div style={{ background:'var(--card)', borderRadius:12, padding:'20px', boxShadow:'var(--shadow-sm)', border:'0.5px solid var(--border)' }}>
-            <h3 style={{ margin:'0 0 14px', fontSize:14, fontWeight:600 }}>AI Forecast vs After Overrides</h3>
+            {/* Filter bar */}
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10, flexWrap:'wrap', gap:8 }}>
+              <h3 style={{ margin:0, fontSize:14, fontWeight:600 }}>AI Forecast vs After Overrides</h3>
+              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                <span style={{ fontSize:11, color:'var(--text-3)' }}>Filter:</span>
+                <MultiSelectDropdown label="Categories" options={CATEGORIES} selected={filterCats} onChange={setFilterCats}/>
+              </div>
+            </div>
+
+            {/* Filter pills */}
+            {filterCats.length > 0 && filterCats.length < CATEGORIES.length && (
+              <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginBottom:10 }}>
+                {filterCats.map(cat => (
+                  <span key={cat} style={{ background:'#EFF6FF', color:'#1B3A6B', border:'1px solid #BFDBFE', borderRadius:12, padding:'2px 10px', fontSize:11, fontWeight:600, display:'flex', alignItems:'center', gap:4 }}>
+                    {cat.length > 22 ? cat.split(' ').slice(0,2).join(' ') : cat}
+                    <button onClick={() => setFilterCats(v => v.filter(c => c !== cat))} style={{ background:'none', border:'none', cursor:'pointer', padding:0, color:'#1B3A6B', lineHeight:1, fontSize:14, fontFamily:'Inter' }}>×</button>
+                  </span>
+                ))}
+              </div>
+            )}
+
             <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={chartData} margin={{ top:5, right:10, left:0, bottom:40 }}>
+              <BarChart data={filteredChartData} margin={{ top:5, right:10, left:0, bottom:40 }}>
                 <defs>
                   <linearGradient id="barGradNavy" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%"   stopColor="#1B3A6B" stopOpacity={1}/>
@@ -314,7 +454,7 @@ export default function OverrideConflicts() {
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#F0F0F0"/>
-                <XAxis dataKey="category" tick={{ fontSize:10, fill:'#6B7280' }} angle={-30} textAnchor="end"/>
+                <XAxis dataKey="category" tick={{ fontSize:9, fill:'#6B7280' }} angle={-20} textAnchor="end"/>
                 <YAxis tick={{ fontSize:10, fill:'#6B7280' }} tickFormatter={v => (v/1000).toFixed(0)+'k'}/>
                 <Tooltip content={<CustomTooltip/>}/>
                 <Legend/>
@@ -333,8 +473,6 @@ export default function OverrideConflicts() {
           {/* Map card — 38% */}
           <div style={{ width: isMobile ? '100%' : '38%', flexShrink:0, background:'#0D1B35', borderRadius:16, padding:16 }}>
             <div style={{ fontSize:13, fontWeight:700, color:'white', marginBottom:8 }}>Conflict Status by Branch</div>
-
-            {/* Legend */}
             <div style={{ display:'flex', gap:12, marginBottom:12, flexWrap:'wrap' }}>
               {LEGEND_ITEMS.map(({ color, label }) => (
                 <span key={label} style={{ display:'flex', alignItems:'center', gap:4, fontSize:10, color:'rgba(255,255,255,0.65)' }}>
@@ -343,22 +481,17 @@ export default function OverrideConflicts() {
                 </span>
               ))}
             </div>
-
             <IndiaMap
               onBranchClick={(branch) => setFilterBranch(prev => prev === branch ? null : branch)}
               activeBranch={filterBranch}
               statusMap={CONFLICT_MAP}
               showAsFilter={true}
             />
-
             {filterBranch && (
               <div style={{ display:'flex', justifyContent:'center', marginTop:12 }}>
                 <span style={{ display:'inline-flex', alignItems:'center', gap:6, background:'rgba(255,255,255,0.12)', color:'white', borderRadius:20, padding:'4px 12px', fontSize:11, fontWeight:600 }}>
                   Showing: {filterBranch}
-                  <button
-                    onClick={() => setFilterBranch(null)}
-                    style={{ background:'none', border:'none', color:'rgba(255,255,255,0.6)', cursor:'pointer', padding:0, fontSize:16, lineHeight:1, display:'flex', alignItems:'center' }}
-                  >×</button>
+                  <button onClick={() => setFilterBranch(null)} style={{ background:'none', border:'none', color:'rgba(255,255,255,0.6)', cursor:'pointer', padding:0, fontSize:16, lineHeight:1, display:'flex', alignItems:'center' }}>×</button>
                 </span>
               </div>
             )}
@@ -366,7 +499,6 @@ export default function OverrideConflicts() {
 
           {/* Table — 62% */}
           <div style={{ flex:1, minWidth:0 }}>
-            {/* Count + status filter */}
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:12, flexWrap:'wrap', gap:8 }}>
               <span style={{ fontSize:13, fontWeight:600, color:'var(--text-1)' }}>
                 {filterBranch
@@ -400,8 +532,8 @@ export default function OverrideConflicts() {
                     ) : filteredOverrides.map((ov, i) => {
                       const dec    = decisions[ov.override_id];
                       const devAbs = Math.abs(ov.deviation);
-                      const devColor = devAbs <= 10 ? '#16A34A' : devAbs <= 20 ? '#D97706' : '#DC2626';
-                      const rowBg = dec?.decision === 'accept' ? '#F0FDF4' : dec?.decision === 'reject' ? '#FFFBEB' : i % 2 === 0 ? '#FFF' : '#FAFAFA';
+                      const dc2    = devAbs <= 10 ? '#16A34A' : devAbs <= 20 ? '#D97706' : '#DC2626';
+                      const rowBg  = dec?.decision === 'accept' ? '#F0FDF4' : dec?.decision === 'reject' ? '#FFFBEB' : i % 2 === 0 ? '#FFF' : '#FAFAFA';
                       return (
                         <tr key={i} style={{ background:rowBg }}>
                           <td style={{ padding:'10px 12px', fontWeight:500 }}>
@@ -420,7 +552,7 @@ export default function OverrideConflicts() {
                           <td style={{ padding:'10px 12px', fontSize:11, color:'#6B7280', maxWidth:120 }}>{ov.reason}</td>
                           <td style={{ padding:'10px 12px' }}>{ov.override_by}</td>
                           <td style={{ padding:'10px 12px' }}>
-                            <span style={{ color:devColor, fontWeight:600, background:`${devColor}18`, borderRadius:8, padding:'2px 7px', fontSize:11 }}>
+                            <span style={{ color:dc2, fontWeight:600, background:`${dc2}18`, borderRadius:8, padding:'2px 7px', fontSize:11 }}>
                               {ov.deviation > 0 ? '+' : ''}{ov.deviation?.toFixed(1)}%
                             </span>
                           </td>
@@ -431,21 +563,9 @@ export default function OverrideConflicts() {
                               <span style={{ background:'#F3F4F6', color:'#6B7280', borderRadius:8, padding:'3px 8px', fontSize:10, fontWeight:500 }}>View Only</span>
                             ) : (
                               <div style={{ display:'flex', gap:4 }}>
-                                <button onClick={() => makeDecision(ov.override_id, 'accept', ov.override_value)} style={{
-                                  background: dec?.decision === 'accept' ? '#16A34A' : '#F0FDF4',
-                                  color:      dec?.decision === 'accept' ? 'white'   : '#16A34A',
-                                  border:'1px solid #BBF7D0', borderRadius:5, padding:'3px 8px', fontSize:10, cursor:'pointer',
-                                }}>✅ Accept</button>
-                                <button onClick={() => makeDecision(ov.override_id, 'reject', ov.ai_forecast)} style={{
-                                  background: dec?.decision === 'reject' ? '#D97706' : '#FFFBEB',
-                                  color:      dec?.decision === 'reject' ? 'white'   : '#D97706',
-                                  border:'1px solid #FCD34D', borderRadius:5, padding:'3px 8px', fontSize:10, cursor:'pointer',
-                                }}>❌ Reject</button>
-                                <button onClick={() => makeDecision(ov.override_id, 'custom', customVals[ov.override_id] || ov.override_value)} style={{
-                                  background: dec?.decision === 'custom' ? '#1B3A6B' : '#F4F6FA',
-                                  color:      dec?.decision === 'custom' ? 'white'   : '#1B3A6B',
-                                  border:'1px solid #BFDBFE', borderRadius:5, padding:'3px 6px', fontSize:10, cursor:'pointer',
-                                }}>✏</button>
+                                <button onClick={() => makeDecision(ov.override_id, 'accept', ov.override_value)} style={{ background: dec?.decision==='accept'?'#16A34A':'#F0FDF4', color: dec?.decision==='accept'?'white':'#16A34A', border:'1px solid #BBF7D0', borderRadius:5, padding:'3px 8px', fontSize:10, cursor:'pointer' }}>✅ Accept</button>
+                                <button onClick={() => makeDecision(ov.override_id, 'reject', ov.ai_forecast)}    style={{ background: dec?.decision==='reject'?'#D97706':'#FFFBEB', color: dec?.decision==='reject'?'white':'#D97706', border:'1px solid #FCD34D', borderRadius:5, padding:'3px 8px', fontSize:10, cursor:'pointer' }}>❌ Reject</button>
+                                <button onClick={() => makeDecision(ov.override_id, 'custom', customVals[ov.override_id] || ov.override_value)} style={{ background: dec?.decision==='custom'?'#1B3A6B':'#F4F6FA', color: dec?.decision==='custom'?'white':'#1B3A6B', border:'1px solid #BFDBFE', borderRadius:5, padding:'3px 6px', fontSize:10, cursor:'pointer' }}>✏</button>
                               </div>
                             )}
                           </td>
@@ -472,7 +592,7 @@ export default function OverrideConflicts() {
                 {!isReadOnly && (
                   <button onClick={handleConfirmAll} disabled={saving || Object.keys(decisions).length === 0} style={{
                     background: Object.keys(decisions).length > 0 ? '#16A34A' : '#E5E7EB',
-                    color:      Object.keys(decisions).length > 0 ? 'white'   : '#9CA3AF',
+                    color:      Object.keys(decisions).length > 0 ? 'white' : '#9CA3AF',
                     border:'none', borderRadius:8, padding:'10px 24px', fontSize:13, fontWeight:600,
                     cursor: Object.keys(decisions).length > 0 ? 'pointer' : 'not-allowed', minHeight:44,
                   }}>
@@ -480,11 +600,7 @@ export default function OverrideConflicts() {
                   </button>
                 )}
                 {canResolve && allResolved && (
-                  <button onClick={() => setShowSignoffModal(true)} style={{
-                    background:'#16A34A', color:'white', border:'none', borderRadius:8,
-                    padding:'10px 24px', fontSize:13, fontWeight:600, cursor:'pointer', minHeight:44,
-                    marginLeft:'auto',
-                  }}>
+                  <button onClick={() => setShowSignoffModal(true)} style={{ background:'#16A34A', color:'white', border:'none', borderRadius:8, padding:'10px 24px', fontSize:13, fontWeight:600, cursor:'pointer', minHeight:44, marginLeft:'auto' }}>
                     ✅ Submit for Sign-off
                   </button>
                 )}
@@ -508,12 +624,8 @@ export default function OverrideConflicts() {
               Submit May 2026 forecast for final sign-off? All conflicts resolved. This action is final.
             </div>
             <div style={{ display:'flex', gap:10 }}>
-              <button onClick={() => setShowSignoffModal(false)}
-                style={{ flex:1, background:'var(--bg)', border:'0.5px solid var(--border)', borderRadius:8, padding:'10px', cursor:'pointer', fontSize:13 }}>
-                Cancel
-              </button>
-              <button onClick={handleSignoff} disabled={signingOff}
-                style={{ flex:2, background:'#16A34A', color:'white', border:'none', borderRadius:8, padding:'10px', cursor:'pointer', fontWeight:600, fontSize:13 }}>
+              <button onClick={() => setShowSignoffModal(false)} style={{ flex:1, background:'var(--bg)', border:'0.5px solid var(--border)', borderRadius:8, padding:'10px', cursor:'pointer', fontSize:13 }}>Cancel</button>
+              <button onClick={handleSignoff} disabled={signingOff} style={{ flex:2, background:'#16A34A', color:'white', border:'none', borderRadius:8, padding:'10px', cursor:'pointer', fontWeight:600, fontSize:13 }}>
                 {signingOff ? 'Submitting…' : '✅ Confirm Sign-off'}
               </button>
             </div>
@@ -523,3 +635,5 @@ export default function OverrideConflicts() {
     </div>
   );
 }
+
+const thS = { padding:'10px 12px', textAlign:'right', fontSize:10, fontWeight:600, color:'#6B7280', textTransform:'uppercase', letterSpacing:'0.04em', borderBottom:'1px solid #E5E7EB', whiteSpace:'nowrap' };

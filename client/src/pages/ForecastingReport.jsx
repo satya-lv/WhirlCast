@@ -149,9 +149,12 @@ export default function ForecastingReport() {
   const defaultView = user?.role === 'branch_sales' ? 'branch'
     : user?.role === 'category_team' ? 'category' : 'branch_sku';
 
-  const [viewMode, setViewMode]     = useState(defaultView);
-  const [data, setData]             = useState(null);
+  const [viewMode, setViewMode]       = useState(defaultView);
+  const [data, setData]               = useState(null);
   const [expandedRow, setExpandedRow] = useState(null);
+  const [trendTimeRange, setTrendTimeRange] = useState('All');
+  const [branchFilter, setBranchFilter]     = useState([]);
+  const [showBranchMenu, setShowBranchMenu] = useState(false);
 
   useEffect(() => {
     const load = () => fetch('/api/report').then(r => r.json()).then(setData).catch(console.error);
@@ -504,10 +507,23 @@ export default function ForecastingReport() {
       <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : '3fr 1fr 1fr', gap:16 }}>
 
         <div style={{ background:'var(--card)', borderRadius:'var(--radius-md)', padding:20, boxShadow:'var(--shadow-sm)', border:'0.5px solid var(--border)' }}>
-          <h3 style={{ margin:'0 0 14px', fontSize:14, fontWeight:600, color:'var(--text-1)' }}>Forecast vs Actual Trend</h3>
+          {/* Trend chart filter bar */}
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14, flexWrap:'wrap', gap:8 }}>
+            <h3 style={{ margin:0, fontSize:14, fontWeight:600, color:'var(--text-1)' }}>Forecast vs Actual Trend</h3>
+            <select value={trendTimeRange} onChange={e => setTrendTimeRange(e.target.value)}
+              style={{ padding:'5px 10px', border:'0.5px solid var(--border)', borderRadius:7, fontSize:11, color:'var(--text-1)', background:'var(--card)', fontFamily:'Inter', outline:'none' }}>
+              <option value="All">All (12M)</option>
+              <option value="6M">Last 6M</option>
+              <option value="3M">Last 3M</option>
+            </select>
+          </div>
           <ResponsiveContainer width="100%" height={240}>
             <ComposedChart
-              data={(data.trendData||[]).map(d => ({...d, month: d.month?.replace('-2026',"'26").replace('-2025',"'25")}))}
+              data={(() => {
+                const all = (data.trendData||[]).map(d => ({...d, month: d.month?.replace('-2026',"'26").replace('-2025',"'25")}));
+                const n = trendTimeRange === '3M' ? 3 : trendTimeRange === '6M' ? 6 : all.length;
+                return all.slice(-n);
+              })()}
               margin={{top:5,right:20,left:0,bottom:5}}>
               <defs>
                 <linearGradient id="gradActual"   x1="0" y1="0" x2="0" y2="1">
@@ -533,9 +549,44 @@ export default function ForecastingReport() {
         </div>
 
         <div style={{ background:'var(--card)', borderRadius:'var(--radius-md)', padding:20, boxShadow:'var(--shadow-sm)', border:'0.5px solid var(--border)' }}>
-          <h3 style={{ margin:'0 0 14px', fontSize:14, fontWeight:600, color:'var(--text-1)' }}>Accuracy by Branch</h3>
+          {/* Accuracy chart filter bar */}
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10, gap:8, flexWrap:'wrap' }}>
+            <h3 style={{ margin:0, fontSize:14, fontWeight:600, color:'var(--text-1)' }}>Accuracy by Branch</h3>
+            <div style={{ position:'relative' }}>
+              <button onClick={() => setShowBranchMenu(v => !v)} style={{ background:'var(--card)', border:'0.5px solid var(--border)', borderRadius:7, padding:'4px 10px', fontSize:11, cursor:'pointer', color:'var(--text-1)', display:'flex', alignItems:'center', gap:5 }}>
+                {branchFilter.length === 0 ? 'All Branches' : `${branchFilter.length} selected`} ▾
+              </button>
+              {showBranchMenu && (
+                <div style={{ position:'absolute', top:'calc(100% + 4px)', right:0, zIndex:50, background:'var(--card)', border:'0.5px solid var(--border)', borderRadius:8, boxShadow:'var(--shadow-md)', padding:'6px 0', minWidth:180, maxHeight:220, overflowY:'auto' }}>
+                  <label style={{ display:'flex', alignItems:'center', gap:8, padding:'5px 12px', cursor:'pointer', fontSize:12 }}
+                    onMouseEnter={e => e.currentTarget.style.background='#F5F8FF'} onMouseLeave={e => e.currentTarget.style.background=''}>
+                    <input type="checkbox" checked={branchFilter.length===0} onChange={() => setBranchFilter([])} style={{ accentColor:'#1B3A6B', cursor:'pointer' }}/>
+                    <em style={{ color:'var(--text-2)' }}>All Branches</em>
+                  </label>
+                  {BRANCHES.map(b => (
+                    <label key={b} style={{ display:'flex', alignItems:'center', gap:8, padding:'5px 12px', cursor:'pointer', fontSize:12 }}
+                      onMouseEnter={e => e.currentTarget.style.background='#F5F8FF'} onMouseLeave={e => e.currentTarget.style.background=''}>
+                      <input type="checkbox" checked={branchFilter.includes(b)} style={{ accentColor:'#1B3A6B', cursor:'pointer' }}
+                        onChange={e => setBranchFilter(v => e.target.checked ? [...v,b] : v.filter(x=>x!==b))}/>
+                      {b}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+          {/* Branch filter pills */}
+          {branchFilter.length > 0 && (
+            <div style={{ display:'flex', flexWrap:'wrap', gap:5, marginBottom:8 }}>
+              {branchFilter.map(b => (
+                <span key={b} style={{ background:'#EFF6FF', color:'#1B3A6B', border:'1px solid #BFDBFE', borderRadius:12, padding:'2px 8px', fontSize:10, fontWeight:600, display:'flex', alignItems:'center', gap:4 }}>
+                  {b} <button onClick={() => setBranchFilter(v => v.filter(x=>x!==b))} style={{ background:'none', border:'none', cursor:'pointer', padding:0, color:'#1B3A6B', lineHeight:1, fontSize:13 }}>×</button>
+                </span>
+              ))}
+            </div>
+          )}
           <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={data.branchAccuracy||[]} layout="vertical" margin={{top:5,right:30,left:60,bottom:5}}>
+            <BarChart data={(branchFilter.length ? (data.branchAccuracy||[]).filter(b => branchFilter.includes(b.branch)) : data.branchAccuracy||[])} layout="vertical" margin={{top:5,right:30,left:60,bottom:5}}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false}/>
               <XAxis type="number" domain={[70,100]} tick={{fontSize:9}} tickFormatter={v => `${v}%`}/>
               <YAxis type="category" dataKey="branch" tick={{fontSize:10,fill:'var(--text-2)'}} width={55}/>
