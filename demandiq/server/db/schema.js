@@ -133,6 +133,17 @@ function initSchema() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `);
+
+  // Idempotent migrations — add new columns if not yet present
+  const migrations = [
+    `ALTER TABLE forecast_scenarios ADD COLUMN branch_filter TEXT`,
+    `ALTER TABLE forecast_scenarios ADD COLUMN category_filter TEXT`,
+    `ALTER TABLE forecast_scenarios ADD COLUMN segment_filter TEXT`,
+  ];
+  for (const sql of migrations) {
+    try { db.exec(sql); } catch (_) {}
+  }
+
   db.close();
   console.log('Schema initialized');
 }

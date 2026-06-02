@@ -81,7 +81,7 @@ router.post('/generate', (req, res) => {
             exceptions.push({ branch, sku: product.sku, month, exception_type: type, original_value: orig, corrected_value: val });
           }
 
-          forecastRuns.push({ branch, sku: product.sku, category: product.category, month, value: val, algorithm: req.body?.algorithmConfig?.AX || 'SARIMAX' });
+          forecastRuns.push({ branch, sku: product.sku, category: product.category, segment: product.segment, subsegment: product.subsegment, month, value: val, algorithm: req.body?.algorithmConfig?.AX || 'SARIMAX' });
         }
       }
     }
@@ -96,7 +96,7 @@ router.post('/generate', (req, res) => {
 router.post('/save-scenario', (req, res) => {
   try {
     const db = getDb();
-    const { name, notes, forecast_runs, accuracy, bias } = req.body;
+    const { name, notes, forecast_runs, accuracy, bias, branch_filter, category_filter, segment_filter } = req.body;
     const cycle = db.prepare(`SELECT * FROM forecast_cycles ORDER BY cycle_id DESC LIMIT 1`).get();
 
     const totalUnits = (forecast_runs || []).reduce((s, r) => s + (r.value || 0), 0);
@@ -105,8 +105,9 @@ router.post('/save-scenario', (req, res) => {
     for (const p of products) priceMap[p.sku] = p.price;
     const revenue = Math.round((forecast_runs || []).reduce((s, r) => s + (r.value || 0) * (priceMap[r.sku] || 20000), 0) / 1e5);
 
-    const result = db.prepare(`INSERT INTO forecast_scenarios (cycle_id, name, algorithm_mix, accuracy, bias, revenue, total_units, status, notes, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
-      cycle.cycle_id, name, 'SARIMAX', accuracy || 86.5, bias || 4.1, revenue, totalUnits || 124850, 'draft', notes || '', new Date().toISOString()
+    const result = db.prepare(`INSERT INTO forecast_scenarios (cycle_id, name, algorithm_mix, accuracy, bias, revenue, total_units, status, notes, created_at, branch_filter, category_filter, segment_filter) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      cycle.cycle_id, name, 'SARIMAX', accuracy || 86.5, bias || 4.1, revenue, totalUnits || 124850, 'draft', notes || '', new Date().toISOString(),
+      branch_filter || null, category_filter || null, segment_filter || null
     );
 
     if (forecast_runs && forecast_runs.length > 0) {

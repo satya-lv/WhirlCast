@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Trophy, CheckCircle, Eye, X } from 'lucide-react';
+import { Trophy, CheckCircle, X } from 'lucide-react';
 import { ComposedChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import Modal from '../components/shared/Modal';
 import { useToast } from '../context/ToastContext';
@@ -12,7 +12,44 @@ const SKUS       = ['REF_190L_DirectCool','REF_240L_FrostFree','REF_340L_TripleD
 const CAT_MAP    = { 'REF_190L_DirectCool':'Refrigerator','REF_240L_FrostFree':'Refrigerator','REF_340L_TripleDoor':'Refrigerator','WM_7KG_TopLoad':'Washing Machine','WM_8KG_FrontLoad':'Washing Machine','WM_6.5KG_SemiAuto':'Washing Machine','AC_1.5T_Inverter':'Air Conditioner','AC_2.0T_Split':'Air Conditioner','MW_25L_Convection':'Microwave','IH_3B_SmartGlass':'Induction' };
 const CATEGORIES = ['All','Refrigerator','Washing Machine','Air Conditioner','Microwave','Induction'];
 const LINE_COLORS = ['#1B3A6B','#E31837','#16A34A','#D97706','#7C3AED'];
-const PAGE_SIZE  = 20;
+const PAGE_SIZE  = 25;
+
+const ALL_CATEGORIES_LIB = ['All','Air Conditioner','Direct Cool Refrigerator','Frost Free Refrigerator','Washing Machine','Microwave','Induction'];
+const ALL_SEGMENTS_LIB   = ['All','1.5 Ton','2.0 Ton','180-200L','240L','340L','7KG','8KG','6.5KG','25L','3 Burner'];
+
+const SKU_DETAILS = {
+  'REF_190L_DirectCool': { segment:'180-200L', subsegment:'Single Door' },
+  'REF_240L_FrostFree':  { segment:'240L', subsegment:'Double Door' },
+  'REF_340L_TripleDoor': { segment:'340L', subsegment:'Triple Door' },
+  'WM_7KG_TopLoad':      { segment:'7KG', subsegment:'Top Load' },
+  'WM_8KG_FrontLoad':    { segment:'8KG', subsegment:'Front Load' },
+  'WM_6.5KG_SemiAuto':   { segment:'6.5KG', subsegment:'Semi-Automatic' },
+  'AC_1.5T_Inverter':    { segment:'1.5 Ton', subsegment:'Inverter Split' },
+  'AC_2.0T_Split':       { segment:'2.0 Ton', subsegment:'Split' },
+  'MW_25L_Convection':   { segment:'25L', subsegment:'Convection' },
+  'IH_3B_SmartGlass':    { segment:'3 Burner', subsegment:'Smart Glass' },
+};
+
+const SEGMENT_MAP_SEL = {
+  'Refrigerator':    ['180-200L','240L','340L'],
+  'Washing Machine': ['7KG','8KG','6.5KG'],
+  'Air Conditioner': ['1.5 Ton','2.0 Ton'],
+  'Microwave':       ['25L'],
+  'Induction':       ['3 Burner'],
+};
+
+const SUBSEGMENT_MAP = {
+  '1.5 Ton':  ['Inverter Split'],
+  '2.0 Ton':  ['Split'],
+  '180-200L': ['Single Door'],
+  '240L':     ['Double Door'],
+  '340L':     ['Triple Door'],
+  '7KG':      ['Top Load'],
+  '8KG':      ['Front Load'],
+  '6.5KG':    ['Semi-Automatic'],
+  '25L':      ['Convection'],
+  '3 Burner': ['Smart Glass'],
+};
 
 const VIEW_LEVELS = ['Branch × SKU','Branch','Category','National'];
 
@@ -67,8 +104,13 @@ export default function ForecastSelection() {
   const [filterAlgo, setFilterAlgo]   = useState('All');
   const [filterAcc,  setFilterAcc]    = useState('All');
   const [filterDate, setFilterDate]   = useState('All');
+  const [filterBranch2, setFilterBranch2] = useState([]);
+  const [filterCat2,  setFilterCat2]  = useState('All');
+  const [filterSeg2,  setFilterSeg2]  = useState('All');
   const [sortBy,     setSortBy]       = useState('Newest');
   const [page,       setPage]         = useState(1);
+  const [deletingId, setDeletingId]   = useState(null);
+  const [selectedCompLines, setSelectedCompLines] = useState(null);
 
   /* Selection & comparison */
   const [selected,    setSelected]    = useState([]);
@@ -76,10 +118,12 @@ export default function ForecastSelection() {
   const [comparing,   setComparing]   = useState(false);
 
   /* Comparison filters */
-  const [viewLevel,   setViewLevel]   = useState('Branch × SKU');
-  const [compBranch,  setCompBranch]  = useState([]);
-  const [compSku,     setCompSku]     = useState([]);
-  const [compCat,     setCompCat]     = useState('All');
+  const [viewLevel,      setViewLevel]      = useState('Branch × SKU');
+  const [compBranch,     setCompBranch]     = useState([]);
+  const [compSku,        setCompSku]        = useState([]);
+  const [compCat,        setCompCat]        = useState('All');
+  const [compSegment,    setCompSegment]    = useState([]);
+  const [compSubsegment, setCompSubsegment] = useState([]);
 
   /* Chart-level filters */
   const [trendScenFilter,  setTrendScenFilter]  = useState([]);
@@ -106,6 +150,19 @@ export default function ForecastSelection() {
     if (filterAcc === '>85%') list = list.filter(s => (s.accuracy||0) > 85);
     else if (filterAcc === '75-85%') list = list.filter(s => (s.accuracy||0) >= 75 && (s.accuracy||0) <= 85);
     else if (filterAcc === '<75%') list = list.filter(s => (s.accuracy||0) < 75);
+    if (filterBranch2.length > 0) list = list.filter(s => {
+      if (!s.branch_filter) return true;
+      const stored = s.branch_filter.split(',').map(b => b.trim());
+      return filterBranch2.some(b => stored.includes(b));
+    });
+    if (filterCat2 !== 'All') list = list.filter(s => {
+      if (!s.category_filter) return true;
+      return s.category_filter.includes(filterCat2);
+    });
+    if (filterSeg2 !== 'All') list = list.filter(s => {
+      if (!s.segment_filter) return true;
+      return s.segment_filter.includes(filterSeg2);
+    });
     if (filterDate === 'Today') {
       const today = new Date().toDateString();
       list = list.filter(s => new Date(s.created_at).toDateString() === today);
@@ -119,14 +176,26 @@ export default function ForecastSelection() {
     if (sortBy === 'Oldest') list.sort((a,b) => new Date(a.created_at)-new Date(b.created_at));
     else if (sortBy === 'Highest accuracy') list.sort((a,b) => (b.accuracy||0)-(a.accuracy||0));
     else if (sortBy === 'Most units') list.sort((a,b) => (b.total_units||0)-(a.total_units||0));
-    else list.sort((a,b) => new Date(b.created_at)-new Date(a.created_at)); // Newest
+    else list.sort((a,b) => new Date(b.created_at)-new Date(a.created_at));
     return list;
-  }, [scenarios, search, filterAlgo, filterAcc, filterDate, sortBy]);
+  }, [scenarios, search, filterAlgo, filterAcc, filterBranch2, filterCat2, filterSeg2, filterDate, sortBy]);
 
   const totalPages = Math.max(1, Math.ceil(filteredScenarios.length / PAGE_SIZE));
   const pageScenarios = filteredScenarios.slice((page-1)*PAGE_SIZE, page*PAGE_SIZE);
 
   const toggleSelect = id => setSelected(prev => prev.includes(id) ? prev.filter(i=>i!==id) : prev.length < 5 ? [...prev,id] : prev);
+
+  const handleDelete = async (id) => {
+    setDeletingId(id);
+    try {
+      const resp = await fetch(`/api/scenarios/${id}`, { method: 'DELETE' });
+      if (!resp.ok) { const e = await resp.json(); toast.error(e.error || 'Delete failed'); return; }
+      setScenarios(prev => prev.filter(s => s.scenario_id !== id));
+      setSelected(prev => prev.filter(i => i !== id));
+      toast.success('Scenario deleted');
+    } catch { toast.error('Delete failed'); }
+    finally { setDeletingId(null); }
+  };
 
   const handleCompare = async () => {
     if (selected.length < 2) { toast.warning('Select at least 2 scenarios'); return; }
@@ -135,7 +204,7 @@ export default function ForecastSelection() {
       const resp = await fetch('/api/scenarios/compare', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ scenario_ids:selected }) });
       const data = await resp.json();
       setComparison(data);
-      setCompBranch([]); setCompSku([]); setCompCat('All'); setViewLevel('Branch × SKU');
+      setCompBranch([]); setCompSku([]); setCompCat('All'); setCompSegment([]); setCompSubsegment([]); setViewLevel('Branch × SKU');
     } catch { toast.error('Compare failed'); }
     finally { setComparing(false); }
   };
@@ -153,17 +222,35 @@ export default function ForecastSelection() {
 
   /* ── Derived comparison data ── */
   const sc = comparison?.scenarios || [];
-  const fbMap = comparison?.fallbackMap || {};
-
   const getVal = useCallback((runsArr, branch, sku, month) => {
-    if (!runsArr) return fbMap[`${branch}|${sku}|${month}`] || 1;
+    if (!runsArr) return 0;
     const row = runsArr.find(r => r.branch===branch && r.sku===sku && r.month===month);
-    return row?.value || fbMap[`${branch}|${sku}|${month}`] || 1;
-  }, [fbMap]);
+    return row?.value || 0;
+  }, []);
+
+  /* Derived segment / subsegment options for comparison filter bar */
+  const compSegmentOptions = compCat === 'All'
+    ? Object.values(SEGMENT_MAP_SEL).flat()
+    : (SEGMENT_MAP_SEL[compCat] || []);
+
+  const compSubsegmentOptions = compSegment.length === 0
+    ? compSegmentOptions.flatMap(seg => SUBSEGMENT_MAP[seg] || [])
+    : compSegment.flatMap(seg => SUBSEGMENT_MAP[seg] || []);
 
   /* Effective filter sets (empty = all) */
   const effBranches = compBranch.length ? compBranch : BRANCHES;
-  const effSkus     = (compSku.length ? compSku : SKUS).filter(s => compCat === 'All' || CAT_MAP[s] === compCat);
+  const effSkus = (compSku.length ? compSku : SKUS).filter(s => {
+    if (compCat !== 'All' && CAT_MAP[s] !== compCat) return false;
+    if (compSegment.length > 0) {
+      const sd = SKU_DETAILS[s];
+      if (!sd || !compSegment.includes(sd.segment)) return false;
+    }
+    if (compSubsegment.length > 0) {
+      const sd = SKU_DETAILS[s];
+      if (!sd || !compSubsegment.includes(sd.subsegment)) return false;
+    }
+    return true;
+  });
 
   /* Chart lines — keys depend on View Level */
   const chartLineKeys = useMemo(() => {
@@ -175,8 +262,14 @@ export default function ForecastSelection() {
       const cats = compCat === 'All' ? ['Refrigerator','Washing Machine','Air Conditioner','Microwave','Induction'] : [compCat];
       return sc.flatMap(s => cats.map(c => `${s.name} — ${c}`));
     }
-    return sc.map(s => s.name); // National or Branch×SKU → aggregate per scenario
-  }, [sc, viewLevel, effBranches, compCat]);
+    if (viewLevel === 'Branch × SKU') {
+      return sc.flatMap(s => effBranches.flatMap(b => effSkus.map(sku => `${s.name} — ${sku} — ${b}`)));
+    }
+    return sc.map(s => s.name); // National
+  }, [sc, viewLevel, effBranches, effSkus, compCat]);
+
+  /* Active comparison lines (top-3 auto when no manual selection) */
+  const activeCompLines = useMemo(() => selectedCompLines || chartLineKeys.slice(0, 3), [selectedCompLines, chartLineKeys]);
 
   /* Chart data — respects View Level */
   const chartData = useMemo(() => {
@@ -193,6 +286,11 @@ export default function ForecastSelection() {
           const catSkus = effSkus.filter(sk => CAT_MAP[sk] === cat);
           row[`${s.name} — ${cat}`] = effBranches.reduce((sum, b) => sum + catSkus.reduce((ss, sku) => ss + getVal(s.runs, b, sku, m), 0), 0);
         }));
+      } else if (viewLevel === 'Branch × SKU') {
+        sc.forEach(s => effBranches.forEach(b => effSkus.forEach(sku => {
+          const key = `${s.name} — ${sku} — ${b}`;
+          if (activeCompLines.includes(key)) row[key] = getVal(s.runs, b, sku, m);
+        })));
       } else {
         sc.forEach(s => {
           row[s.name] = effBranches.reduce((sum, b) => sum + effSkus.reduce((ss, sku) => ss + getVal(s.runs, b, sku, m), 0), 0);
@@ -200,7 +298,7 @@ export default function ForecastSelection() {
       }
       return row;
     });
-  }, [sc, viewLevel, effBranches, effSkus, compCat, fbMap, getVal]);
+  }, [sc, viewLevel, effBranches, effSkus, compCat, activeCompLines, getVal]);
 
   /* Deepdive table rows */
   const deepDiveRows = useMemo(() => {
@@ -238,7 +336,7 @@ export default function ForecastSelection() {
       rows.push({ label1:'National Total', label2:'', v1, v2, t1, t2, delta: t1>0?((t2-t1)/t1*100).toFixed(1):'0.0' });
     }
     return rows;
-  }, [sc, viewLevel, effBranches, effSkus, compCat, fbMap, getVal]);
+  }, [sc, viewLevel, effBranches, effSkus, compCat, getVal]);
 
   const getWinner = field => scenarios.reduce((best,s) => {
     if (field==='accuracy') return (!best||(s.accuracy||0)>(best.accuracy||0))?s:best;
@@ -261,68 +359,89 @@ export default function ForecastSelection() {
       <div style={{ display:'grid', gridTemplateColumns:'300px 1fr', gap:20, alignItems:'start' }}>
 
         {/* ── Left: Scenario Library ── */}
-        <div style={{ background:'var(--card)', borderRadius:'var(--radius-md)', padding:'18px', boxShadow:'var(--shadow-sm)', border:'0.5px solid var(--border)' }}>
-          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
+        <div style={{ background:'var(--card)', borderRadius:'var(--radius-md)', padding:'14px', boxShadow:'var(--shadow-sm)', border:'0.5px solid var(--border)' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
             <h3 style={{ margin:0, fontSize:14, fontWeight:600 }}>Scenario Library</h3>
             <span style={{ background:'#1B3A6B', color:'white', borderRadius:12, padding:'1px 8px', fontSize:11 }}>{scenarios.length}</span>
           </div>
 
           {/* Search */}
           <input value={search} onChange={e => { setSearch(e.target.value); setPage(1); }}
-            placeholder="Search scenarios..."
-            style={{ width:'100%', padding:'8px 10px', border:'0.5px solid var(--border)', borderRadius:8, fontSize:12, color:'var(--text-1)', background:'var(--bg)', fontFamily:'Inter', outline:'none', boxSizing:'border-box', marginBottom:10 }}/>
+            placeholder="Search by name..."
+            style={{ width:'100%', padding:'7px 10px', border:'0.5px solid var(--border)', borderRadius:7, fontSize:12, color:'var(--text-1)', background:'var(--bg)', fontFamily:'Inter', outline:'none', boxSizing:'border-box', marginBottom:7 }}/>
 
-          {/* Filters */}
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6, marginBottom:8 }}>
+          {/* Filter grid — 2 columns */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:5, marginBottom:6 }}>
             {[
-              { label:'Algorithm', value:filterAlgo, set:setFilterAlgo, opts:['All','SARIMAX','RF','XGBoost','Prophet','Moving Average'] },
-              { label:'Accuracy',  value:filterAcc,  set:setFilterAcc,  opts:['All','>85%','75-85%','<75%'] },
-              { label:'Date',      value:filterDate, set:setFilterDate, opts:['All','Today','This week','This month'] },
-              { label:'Sort',      value:sortBy,     set:setSortBy,     opts:['Newest','Oldest','Highest accuracy','Most units'] },
+              { label:'Algorithm', value:filterAlgo, set:v=>{setFilterAlgo(v);setPage(1);}, opts:['All','SARIMAX','RF','XGBoost','Prophet','Moving Average'] },
+              { label:'Accuracy',  value:filterAcc,  set:v=>{setFilterAcc(v);setPage(1);},  opts:['All','>85%','75-85%','<75%'] },
+              { label:'Sort',      value:sortBy,     set:v=>{setSortBy(v);setPage(1);},     opts:['Newest','Oldest','Highest accuracy','Most units'] },
+              { label:'Category',  value:filterCat2, set:v=>{setFilterCat2(v);setPage(1);}, opts:ALL_CATEGORIES_LIB },
             ].map(f => (
               <div key={f.label}>
-                <div style={{ fontSize:10, fontWeight:600, color:'var(--text-3)', marginBottom:3, textTransform:'uppercase', letterSpacing:'0.04em' }}>{f.label}</div>
-                <select value={f.value} onChange={e => { f.set(e.target.value); setPage(1); }} style={{ ...selStyle, width:'100%' }}>
+                <div style={{ fontSize:9, fontWeight:600, color:'var(--text-3)', marginBottom:2, textTransform:'uppercase', letterSpacing:'0.04em' }}>{f.label}</div>
+                <select value={f.value} onChange={e=>f.set(e.target.value)} style={{ ...selStyle, width:'100%', fontSize:11, padding:'4px 5px' }}>
                   {f.opts.map(o => <option key={o}>{o}</option>)}
                 </select>
               </div>
             ))}
           </div>
 
-          {/* Count */}
-          <div style={{ fontSize:11, color:'var(--text-3)', marginBottom:10 }}>
-            Showing {Math.min(pageScenarios.length, PAGE_SIZE)} of {filteredScenarios.length} scenarios
-            {selected.length > 0 && <span style={{ marginLeft:8, color:'#1B3A6B', fontWeight:600 }}> · {selected.length} selected</span>}
+          {/* Branch multi-select */}
+          <div style={{ marginBottom:5 }}>
+            <div style={{ fontSize:9, fontWeight:600, color:'var(--text-3)', marginBottom:2, textTransform:'uppercase', letterSpacing:'0.04em' }}>Branch</div>
+            <MultiSelectDropdown label="Branches" options={BRANCHES} selected={filterBranch2} onChange={v=>{setFilterBranch2(v);setPage(1);}}/>
           </div>
 
-          {/* Cards */}
-          <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+          {/* Segment dropdown */}
+          <div style={{ marginBottom:8 }}>
+            <div style={{ fontSize:9, fontWeight:600, color:'var(--text-3)', marginBottom:2, textTransform:'uppercase', letterSpacing:'0.04em' }}>Segment</div>
+            <select value={filterSeg2} onChange={e=>{setFilterSeg2(e.target.value);setPage(1);}} style={{ ...selStyle, width:'100%', fontSize:11, padding:'4px 5px' }}>
+              {ALL_SEGMENTS_LIB.map(o => <option key={o}>{o}</option>)}
+            </select>
+          </div>
+
+          {/* Count */}
+          <div style={{ fontSize:11, color:'var(--text-3)', marginBottom:6 }}>
+            Showing {Math.min(page*PAGE_SIZE, filteredScenarios.length)} of {filteredScenarios.length}
+            {selected.length > 0 && <span style={{ marginLeft:6, color:'#1B3A6B', fontWeight:600 }}>· {selected.length} selected</span>}
+          </div>
+
+          {/* Compact scrollable list */}
+          <div style={{ maxHeight:360, overflowY:'auto', border:'0.5px solid var(--border)', borderRadius:8 }}>
+            {pageScenarios.length === 0 && (
+              <div style={{ padding:24, textAlign:'center', color:'var(--text-2)', fontSize:12 }}>No scenarios match filters</div>
+            )}
             {pageScenarios.map(s => {
               const isSel = selected.includes(s.scenario_id);
               const acc   = s.accuracy || 0;
               return (
-                <div key={s.scenario_id} style={{ border:`2px solid ${isSel?'#1B3A6B':'var(--border)'}`, borderRadius:10, padding:'10px 12px', background:isSel?'#EFF6FF':'var(--card)', transition:'all 0.15s', cursor:'pointer' }}
-                  onClick={() => toggleSelect(s.scenario_id)}>
-                  <div style={{ display:'flex', alignItems:'flex-start', gap:6 }}>
-                    <input type="checkbox" checked={isSel} readOnly style={{ accentColor:'#1B3A6B', width:13, height:13, marginTop:2, flexShrink:0 }}/>
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ fontSize:13, fontWeight:600, color:'var(--text-1)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{s.name}</div>
-                      <div style={{ fontSize:10, color:'var(--text-3)', marginTop:2 }}>
-                        {new Date(s.created_at).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})}
-                        {s.total_units ? <span style={{ marginLeft:8 }}>{(s.total_units||0).toLocaleString('en-IN')} units</span> : null}
-                      </div>
-                      <div style={{ display:'flex', gap:5, marginTop:6, flexWrap:'wrap' }}>
-                        <span style={{ background:'#E8EEF7', color:'#1B3A6B', borderRadius:8, padding:'2px 6px', fontSize:10, fontWeight:600 }}>{s.algorithm_mix?.split('+')[0]?.trim()||'SARIMAX'}</span>
-                        <span style={{ background:acc>=85?'#F0FDF4':'#FFFBEB', color:acc>=85?'#16A34A':'#D97706', borderRadius:8, padding:'2px 6px', fontSize:10, fontWeight:600 }}>{acc.toFixed(1)}%</span>
-                        {s.status==='finalized' && <span style={{ background:'#16A34A', color:'white', borderRadius:8, padding:'2px 6px', fontSize:10 }}>✓ Final</span>}
-                      </div>
+                <div key={s.scenario_id}
+                  onClick={() => toggleSelect(s.scenario_id)}
+                  style={{ display:'flex', alignItems:'center', gap:6, padding:'7px 10px', borderBottom:'0.5px solid var(--border)', background:isSel?'#EFF6FF':'var(--card)', cursor:'pointer', transition:'background 0.1s' }}
+                  onMouseEnter={e => { if(!isSel) e.currentTarget.style.background='#F5F8FF'; }}
+                  onMouseLeave={e => { if(!isSel) e.currentTarget.style.background='var(--card)'; }}>
+                  <input type="checkbox" checked={isSel} readOnly style={{ accentColor:'#1B3A6B', width:12, height:12, flexShrink:0 }}/>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:12, fontWeight:600, color:'var(--text-1)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{s.name}</div>
+                    <div style={{ display:'flex', gap:4, alignItems:'center', marginTop:2, flexWrap:'wrap' }}>
+                      <span style={{ fontSize:9, color:'var(--text-3)' }}>{new Date(s.created_at).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})}</span>
+                      <span style={{ background:'#E8EEF7', color:'#1B3A6B', borderRadius:4, padding:'0 4px', fontSize:9, fontWeight:600 }}>{s.algorithm_mix?.split('+')[0]?.trim()||'SARIMAX'}</span>
+                      {s.segment_filter && <span style={{ background:'#F0FDFA', color:'#0F766E', borderRadius:4, padding:'0 4px', fontSize:9, fontWeight:600 }}>{s.segment_filter.split(',')[0]}</span>}
+                      {s.branch_filter && <span style={{ background:'#FDF4FF', color:'#7C3AED', borderRadius:4, padding:'0 4px', fontSize:9, fontWeight:600 }}>{s.branch_filter.split(',').slice(0,2).join(',')}{s.branch_filter.split(',').length>2?'+':''}</span>}
+                      {s.status==='finalized' && <span style={{ background:'#16A34A', color:'white', borderRadius:4, padding:'0 4px', fontSize:9 }}>Final</span>}
                     </div>
-                    <div style={{ display:'flex', flexDirection:'column', gap:4, flexShrink:0 }}>
-                      <button onClick={e => { e.stopPropagation(); toggleSelect(s.scenario_id); }} title={isSel?'Deselect':'Select'}
-                        style={{ background:'none', border:'none', cursor:'pointer', color:'#1B3A6B', padding:2 }}>
-                        <Eye size={13}/>
-                      </button>
-                    </div>
+                  </div>
+                  <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:2, flexShrink:0, marginRight:4 }}>
+                    <span style={{ background:acc>=85?'#F0FDF4':'#FFFBEB', color:acc>=85?'#16A34A':'#D97706', borderRadius:5, padding:'1px 5px', fontSize:10, fontWeight:700 }}>{acc.toFixed(1)}%</span>
+                    <span style={{ fontSize:9, color:'var(--text-3)' }}>{(s.total_units||0).toLocaleString('en-IN')}u</span>
+                  </div>
+                  <div style={{ display:'flex', gap:2, flexShrink:0 }} onClick={e=>e.stopPropagation()}>
+                    <button title="Select" onClick={() => toggleSelect(s.scenario_id)} style={{ background:'none', border:'none', cursor:'pointer', padding:3, color:'#6B7280', fontSize:13, lineHeight:1 }}>👁</button>
+                    {s.status !== 'finalized' && (
+                      <button title="Delete" onClick={() => handleDelete(s.scenario_id)} disabled={deletingId===s.scenario_id}
+                        style={{ background:'none', border:'none', cursor:'pointer', padding:3, color:'#DC2626', fontSize:13, lineHeight:1, opacity:deletingId===s.scenario_id?0.4:1 }}>🗑</button>
+                    )}
                   </div>
                 </div>
               );
@@ -331,16 +450,14 @@ export default function ForecastSelection() {
 
           {/* Pagination */}
           {totalPages > 1 && (
-            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginTop:10 }}>
-              <button onClick={() => setPage(p=>Math.max(1,p-1))} disabled={page===1}
-                style={{ ...btnSm, opacity:page===1?0.4:1 }}>← Prev</button>
-              <span style={{ fontSize:11, color:'var(--text-3)' }}>Page {page} of {totalPages}</span>
-              <button onClick={() => setPage(p=>Math.min(totalPages,p+1))} disabled={page===totalPages}
-                style={{ ...btnSm, opacity:page===totalPages?0.4:1 }}>Next →</button>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginTop:8 }}>
+              <button onClick={() => setPage(p=>Math.max(1,p-1))} disabled={page===1} style={{ ...btnSm, opacity:page===1?0.4:1 }}>← Prev</button>
+              <span style={{ fontSize:11, color:'var(--text-3)' }}>Page {page}/{totalPages}</span>
+              <button onClick={() => setPage(p=>Math.min(totalPages,p+1))} disabled={page===totalPages} style={{ ...btnSm, opacity:page===totalPages?0.4:1 }}>Next →</button>
             </div>
           )}
 
-          <div style={{ marginTop:10, fontSize:11, color:'var(--text-3)', textAlign:'center' }}>Select up to 5 (min 2)</div>
+          <div style={{ marginTop:8, fontSize:11, color:'var(--text-3)', textAlign:'center' }}>Select 2–5 scenarios to compare</div>
           <button onClick={handleCompare} disabled={selected.length<2||comparing}
             style={{ background:selected.length>=2?'#1B3A6B':'#E5E7EB', color:selected.length>=2?'white':'var(--text-3)', border:'none', borderRadius:8, padding:'10px', width:'100%', marginTop:8, fontSize:13, fontWeight:600, cursor:selected.length>=2?'pointer':'not-allowed', fontFamily:'Inter' }}>
             {comparing ? 'Comparing...' : `Compare ${selected.length>=2?`(${selected.length})`:''}→`}
@@ -373,14 +490,22 @@ export default function ForecastSelection() {
                   <MultiSelectDropdown label="Branches" options={BRANCHES} selected={compBranch} onChange={setCompBranch}/>
                 </div>
                 <div>
-                  <div style={{ fontSize:10, fontWeight:600, color:'var(--text-3)', marginBottom:3, textTransform:'uppercase' }}>SKU</div>
-                  <MultiSelectDropdown label="SKUs" options={SKUS} selected={compSku} onChange={setCompSku}/>
-                </div>
-                <div>
                   <div style={{ fontSize:10, fontWeight:600, color:'var(--text-3)', marginBottom:3, textTransform:'uppercase' }}>Category</div>
-                  <select value={compCat} onChange={e=>setCompCat(e.target.value)} style={selStyle}>
+                  <select value={compCat} onChange={e=>{ setCompCat(e.target.value); setCompSegment([]); setCompSubsegment([]); }} style={selStyle}>
                     {CATEGORIES.map(c=><option key={c}>{c}</option>)}
                   </select>
+                </div>
+                <div>
+                  <div style={{ fontSize:10, fontWeight:600, color:'var(--text-3)', marginBottom:3, textTransform:'uppercase' }}>Segment</div>
+                  <MultiSelectDropdown label="Segments" options={compSegmentOptions} selected={compSegment} onChange={v=>{ setCompSegment(v); setCompSubsegment([]); }}/>
+                </div>
+                <div>
+                  <div style={{ fontSize:10, fontWeight:600, color:'var(--text-3)', marginBottom:3, textTransform:'uppercase' }}>Subsegment</div>
+                  <MultiSelectDropdown label="Subsegments" options={compSubsegmentOptions} selected={compSubsegment} onChange={setCompSubsegment}/>
+                </div>
+                <div>
+                  <div style={{ fontSize:10, fontWeight:600, color:'var(--text-3)', marginBottom:3, textTransform:'uppercase' }}>SKU</div>
+                  <MultiSelectDropdown label="SKUs" options={SKUS} selected={compSku} onChange={setCompSku}/>
                 </div>
               </div>
 
@@ -425,12 +550,15 @@ export default function ForecastSelection() {
 
               {/* Trend chart */}
               <div style={{ background:'var(--card)', borderRadius:'var(--radius-md)', padding:'20px', boxShadow:'var(--shadow-sm)', border:'0.5px solid var(--border)' }}>
-                {/* Filter bar */}
                 <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10, flexWrap:'wrap', gap:8 }}>
-                  <h3 style={{ margin:0, fontSize:14, fontWeight:600 }}>Forecast Trend Comparison</h3>
+                  <h3 style={{ margin:0, fontSize:14, fontWeight:600 }}>
+                    Forecast Trend Comparison
+                    <span style={{ marginLeft:8, fontSize:10, fontWeight:400, color:'var(--text-3)', background:'#F4F6FA', borderRadius:5, padding:'2px 7px' }}>{viewLevel}</span>
+                  </h3>
                   <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                    <MultiSelectDropdown label="Scenarios" options={sc.map(s=>s.name)} selected={trendScenFilter} onChange={v=>{setTrendScenFilter(v);}}/>
-                    <span style={{ fontSize:10, color:'var(--text-3)', background:'#F4F6FA', borderRadius:6, padding:'3px 8px' }}>{viewLevel}</span>
+                    {viewLevel === 'Branch × SKU' && (
+                      <MultiSelectDropdown label="Lines" options={chartLineKeys} selected={selectedCompLines||[]} onChange={v=>setSelectedCompLines(v.length?v:null)}/>
+                    )}
                     <select value={trendTimeRange} onChange={e => setTrendTimeRange(e.target.value)}
                       style={{ padding:'5px 8px', border:'0.5px solid var(--border)', borderRadius:7, fontSize:11, color:'var(--text-1)', background:'var(--card)', fontFamily:'Inter', outline:'none' }}>
                       <option value="All">All Months</option>
@@ -439,27 +567,28 @@ export default function ForecastSelection() {
                     </select>
                   </div>
                 </div>
-                {/* Scenario pills */}
-                {trendScenFilter.length > 0 && trendScenFilter.length < sc.length && (
+                {/* Active line pills for Branch × SKU */}
+                {viewLevel === 'Branch × SKU' && activeCompLines.length > 0 && (
                   <div style={{ display:'flex', flexWrap:'wrap', gap:5, marginBottom:8 }}>
-                    {trendScenFilter.map((name, i) => (
-                      <span key={name} style={{ background:`${LINE_COLORS[sc.findIndex(s=>s.name===name)%LINE_COLORS.length]}18`, color:LINE_COLORS[sc.findIndex(s=>s.name===name)%LINE_COLORS.length], border:`1px solid ${LINE_COLORS[sc.findIndex(s=>s.name===name)%LINE_COLORS.length]}40`, borderRadius:12, padding:'2px 8px', fontSize:10, fontWeight:600, display:'flex', alignItems:'center', gap:4 }}>
-                        {name} <button onClick={() => setTrendScenFilter(v=>v.filter(n=>n!==name))} style={{ background:'none', border:'none', cursor:'pointer', padding:0, lineHeight:1, fontSize:13 }}>×</button>
+                    {activeCompLines.map((k, ki) => (
+                      <span key={k} style={{ background:`${LINE_COLORS[ki%LINE_COLORS.length]}18`, color:LINE_COLORS[ki%LINE_COLORS.length], border:`1px solid ${LINE_COLORS[ki%LINE_COLORS.length]}40`, borderRadius:10, padding:'2px 8px', fontSize:10, fontWeight:600, display:'flex', alignItems:'center', gap:4 }}>
+                        {k}
+                        <button onClick={() => setSelectedCompLines(prev => { const cur = prev||activeCompLines; const next = cur.filter(l=>l!==k); return next.length?next:null; })} style={{ background:'none', border:'none', cursor:'pointer', padding:0, lineHeight:1, fontSize:13 }}>×</button>
                       </span>
                     ))}
+                    {viewLevel === 'Branch × SKU' && selectedCompLines && (
+                      <button onClick={() => setSelectedCompLines(null)} style={{ background:'none', border:'none', cursor:'pointer', fontSize:10, color:'var(--text-3)', fontFamily:'Inter' }}>Reset to top-3</button>
+                    )}
                   </div>
                 )}
                 <ResponsiveContainer width="100%" height={250}>
                   {(() => {
-                    const activeKeys = trendScenFilter.length
-                      ? chartLineKeys.filter(k => trendScenFilter.some(n => k.startsWith(n)))
-                      : chartLineKeys;
+                    const displayKeys = viewLevel === 'Branch × SKU' ? activeCompLines : (trendScenFilter.length ? chartLineKeys.filter(k=>trendScenFilter.some(n=>k.startsWith(n))) : chartLineKeys);
                     const n = trendTimeRange === '3M' ? 3 : trendTimeRange === '6M' ? 6 : chartData.length;
-                    const filteredData = chartData.slice(-n);
                     return (
-                      <ComposedChart data={filteredData} margin={{top:5,right:20,left:0,bottom:5}}>
+                      <ComposedChart data={chartData.slice(-n)} margin={{top:5,right:20,left:0,bottom:5}}>
                         <defs>
-                          {activeKeys.map((k,ki) => (
+                          {displayKeys.map((k,ki) => (
                             <linearGradient key={ki} id={`scG${ki}`} x1="0" y1="0" x2="0" y2="1">
                               <stop offset="5%"  stopColor={LINE_COLORS[ki%LINE_COLORS.length]} stopOpacity={0.15}/>
                               <stop offset="95%" stopColor={LINE_COLORS[ki%LINE_COLORS.length]} stopOpacity={0}/>
@@ -471,8 +600,8 @@ export default function ForecastSelection() {
                         <YAxis tick={{fontSize:11,fill:'var(--text-2)'}} tickFormatter={v=>(v/1000).toFixed(0)+'k'}/>
                         <Tooltip content={<CustomTooltip/>}/>
                         <Legend wrapperStyle={{fontSize:10}}/>
-                        {activeKeys.map((key,ki) => (
-                          <Area key={key} type="monotone" dataKey={key} stroke={LINE_COLORS[ki%LINE_COLORS.length]} strokeWidth={2} fill={`url(#scG${ki})`} dot={false} isAnimationActive animationDuration={800} strokeDasharray={ki>0?'5 3':'none'}/>
+                        {displayKeys.map((key,ki) => (
+                          <Area key={key} type="monotone" dataKey={key} name={key} stroke={LINE_COLORS[ki%LINE_COLORS.length]} strokeWidth={2} fill={`url(#scG${ki})`} dot={false} isAnimationActive animationDuration={800} strokeDasharray={ki>0?'5 3':'none'}/>
                         ))}
                       </ComposedChart>
                     );

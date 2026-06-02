@@ -181,7 +181,7 @@ export default function DemandSensing() {
 
       {/* Header */}
       <div style={{ marginBottom: 20 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
           <Sparkles size={20} color="#E31837" />
           <span style={{
             fontSize: 18, fontWeight: 700,
@@ -190,8 +190,13 @@ export default function DemandSensing() {
           }}>
             AI-Powered Module — Demand Sensing
           </span>
+          <span style={{ fontSize: 11, background: '#FEF3C7', color: '#92400E', padding: '2px 8px', borderRadius: 4, marginLeft: 8, fontWeight: 600 }}>
+            [OPTIONAL]
+          </span>
         </div>
-        <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>Upload documents to extract demand signals and adjust forecasts</p>
+        <p style={{ margin: 0, fontSize: 12, color: 'var(--text-2)' }}>
+          This module is optional. Use it to incorporate unstructured market intelligence into your forecast. Skip it if not needed for this cycle.
+        </p>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>

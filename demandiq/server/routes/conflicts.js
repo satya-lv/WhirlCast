@@ -99,4 +99,37 @@ router.post('/resolve', (req, res) => {
   }
 });
 
+router.post('/category-override', (req, res) => {
+  try {
+    const db = getDb();
+    const { overrides } = req.body;
+    if (!overrides?.length) return res.json({ success: true, updated: 0 });
+
+    const cycle    = db.prepare(`SELECT * FROM forecast_cycles ORDER BY cycle_id DESC LIMIT 1`).get();
+    const scenario = db.prepare(`SELECT * FROM forecast_scenarios WHERE cycle_id=? AND status='finalized' LIMIT 1`).get(cycle.cycle_id);
+    const sid      = scenario?.scenario_id;
+
+    for (const ov of overrides) {
+      const val = Math.max(0, Math.round(ov.value));
+      const existing = db.prepare(`SELECT * FROM branch_overrides WHERE cycle_id=? AND branch=? AND sku=? AND month=?`).get(cycle.cycle_id, ov.branch, ov.sku, ov.month);
+
+      if (existing) {
+        db.prepare(`UPDATE branch_overrides SET override_value=?, reason='Category override', override_by='Category Team', override_on=datetime('now'), override_version=override_version+1, status='submitted' WHERE override_id=?`).run(val, existing.override_id);
+      } else {
+        const aiVal = sid ? (db.prepare(`SELECT value FROM forecast_runs WHERE scenario_id=? AND branch=? AND sku=? AND month=? LIMIT 1`).get(sid, ov.branch, ov.sku, ov.month)?.value || 0) : 0;
+        db.prepare(`INSERT INTO branch_overrides (cycle_id, branch, sku, month, ai_forecast, override_value, reason, override_by, override_on, override_version, status) VALUES (?,?,?,?,?,?,?,?,datetime('now'),1,'submitted')`).run(cycle.cycle_id, ov.branch, ov.sku, ov.month, aiVal, val, 'Category override', 'Category Team');
+      }
+
+      if (sid) {
+        db.prepare(`UPDATE forecast_runs SET value=? WHERE branch=? AND sku=? AND month=? AND scenario_id=?`).run(val, ov.branch, ov.sku, ov.month, sid);
+      }
+    }
+
+    db.close();
+    res.json({ success: true, updated: overrides.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

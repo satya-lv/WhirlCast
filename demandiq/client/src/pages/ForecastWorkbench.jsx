@@ -51,6 +51,54 @@ const EXCEPTION_COLORS = {
   'Null Data Point':'#6B7280','Sudden Volume Drop':'#EA580C',
 };
 
+const SKU_DETAILS = {
+  'REF_190L_DirectCool': { segment:'180-200L', subsegment:'Single Door' },
+  'REF_240L_FrostFree':  { segment:'240L', subsegment:'Double Door' },
+  'REF_340L_TripleDoor': { segment:'340L', subsegment:'Triple Door' },
+  'WM_7KG_TopLoad':      { segment:'7KG', subsegment:'Top Load' },
+  'WM_8KG_FrontLoad':    { segment:'8KG', subsegment:'Front Load' },
+  'WM_6.5KG_SemiAuto':   { segment:'6.5KG', subsegment:'Semi-Automatic' },
+  'AC_1.5T_Inverter':    { segment:'1.5 Ton', subsegment:'Inverter Split' },
+  'AC_2.0T_Split':       { segment:'2.0 Ton', subsegment:'Split' },
+  'MW_25L_Convection':   { segment:'25L', subsegment:'Convection' },
+  'IH_3B_SmartGlass':    { segment:'3 Burner', subsegment:'Smart Glass' },
+};
+
+const SEGMENT_MAP = {
+  'Air Conditioner':          ['1.5 Ton','2.0 Ton'],
+  'Direct Cool Refrigerator': ['180-200L'],
+  'Frost Free Refrigerator':  ['240L','340L'],
+  'Washing Machine':          ['7KG','8KG','6.5KG'],
+  'Microwave':                ['25L'],
+  'Induction':                ['3 Burner'],
+};
+
+const SUBSEGMENT_MAP = {
+  '1.5 Ton':  ['Inverter Split'],
+  '2.0 Ton':  ['Split'],
+  '180-200L': ['Single Door'],
+  '240L':     ['Double Door'],
+  '340L':     ['Triple Door'],
+  '7KG':      ['Top Load'],
+  '8KG':      ['Front Load'],
+  '6.5KG':    ['Semi-Automatic'],
+  '25L':      ['Convection'],
+  '3 Burner': ['Smart Glass'],
+};
+
+const WB_CAT_COLORS = {
+  'Direct Cool Refrigerator': { bg:'EFF6FF', text:'1D4ED8' },
+  'Frost Free Refrigerator':  { bg:'F0FDFA', text:'0F766E' },
+  'Washing Machine':          { bg:'F0FDF4', text:'166534' },
+  'Air Conditioner':          { bg:'FFFBEB', text:'92400E' },
+  'Microwave':                { bg:'FDF4FF', text:'7E22CE' },
+  'Induction':                { bg:'FFF7ED', text:'9A3412' },
+};
+const CatBadge = ({ cat }) => {
+  const c = WB_CAT_COLORS[cat] || { bg:'F3F4F6', text:'374151' };
+  return <span style={{ background:`#${c.bg}`, color:`#${c.text}`, fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:20, whiteSpace:'nowrap' }}>{cat}</span>;
+};
+
 const LINE_COLORS = ['#1B3A6B','#E31837','#16A34A','#D97706','#7C3AED','#0891B2','#EA580C','#0F766E'];
 
 /* ── Small helpers ── */
@@ -104,11 +152,18 @@ const CustomTooltip = ({ active, payload, label }) => {
   );
 };
 
-const downloadCSV = (rows, filename) => {
-  const headers = ['Branch','SKU','Category',...MONTH_LBL,'6M Total'];
+const downloadCSV = (rows, filename, withDetails = false) => {
+  const headers = withDetails
+    ? ['Branch','SKU','Category','Segment','Subsegment',...MONTH_LBL,'6M Total']
+    : ['Branch','SKU / Category',...MONTH_LBL,'6M Total'];
   const lines = [headers.join(','), ...rows.map(r => {
     const vals = MONTHS_FWD.map(m => r.months[m] || 0);
-    return [r.branch||'',r.sku||'',CAT_MAP[r.sku]||'',...vals,vals.reduce((s,v)=>s+v,0)].join(',');
+    const total = vals.reduce((s,v)=>s+v,0);
+    if (withDetails) {
+      const sd = SKU_DETAILS[r.sku] || {};
+      return [`"${r.branch||''}"`,`"${r.sku||''}"`,`"${r.cat||CAT_MAP[r.sku]||''}"`,`"${r.segment||sd.segment||''}"`,`"${r.subsegment||sd.subsegment||''}"`, ...vals, total].join(',');
+    }
+    return [`"${r.branch||''}"`,`"${r.sku||''}"`, ...vals, total].join(',');
   })];
   const blob = new Blob([lines.join('\n')], { type:'text/csv' });
   const url  = URL.createObjectURL(blob);
@@ -157,11 +212,13 @@ export default function ForecastWorkbench() {
   const { toast } = useToast();
 
   /* Top filter bar */
-  const [filterBranch,   setFilterBranch]   = useState([]);
-  const [filterCategory, setFilterCategory] = useState([]);
-  const [filterSku,      setFilterSku]      = useState([]);
-  const [filterPeriod,   setFilterPeriod]   = useState('Jun–Nov 2026');
-  const [forecastLevel,  setForecastLevel]  = useState('branch_sku');
+  const [filterBranch,      setFilterBranch]      = useState([]);
+  const [filterCategory,    setFilterCategory]    = useState([]);
+  const [filterSegment,     setFilterSegment]     = useState([]);
+  const [filterSubsegment,  setFilterSubsegment]  = useState([]);
+  const [filterSku,         setFilterSku]         = useState([]);
+  const [filterPeriod,      setFilterPeriod]      = useState('Jun–Nov 2026');
+  const [forecastLevel,     setForecastLevel]     = useState('branch_sku');
 
   /* Variables / causals */
   const [primaryVars,  setPrimaryVars]  = useState({ historicalSales:false, primarySales:false, secondarySales:false, allCombined:true });
@@ -175,6 +232,11 @@ export default function ForecastWorkbench() {
     ABC.forEach(a => XYZ.forEach(x => { m[`${a}|${x}`] = 'SARIMAX'; }));
     setAlgoMatrix(m);
   }, []);
+
+  /* Cascade resets for segment/subsegment filters */
+  useEffect(() => { setFilterSegment([]); setFilterSubsegment([]); }, [filterCategory]);
+  useEffect(() => { setFilterSubsegment([]); }, [filterSegment]);
+  useEffect(() => { setSelectedLines(null); }, [filterSegment, filterSubsegment]);
 
   /* Run state */
   const [loading, setLoading]           = useState(false);
@@ -216,7 +278,12 @@ export default function ForecastWorkbench() {
     if (!scenarioName.trim()) { toast.warning('Please enter a scenario name'); return; }
     setSaving(true);
     try {
-      await fetch('/api/forecast/save-scenario', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ name:scenarioName, notes:scenarioNotes, forecast_runs:result }) });
+      await fetch('/api/forecast/save-scenario', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+        name:scenarioName, notes:scenarioNotes, forecast_runs:result,
+        branch_filter:   filterBranch.length   ? filterBranch.join(',')   : null,
+        category_filter: filterCategory.length  ? filterCategory.join(',') : null,
+        segment_filter:  filterSegment.length   ? filterSegment.join(',')  : null,
+      }) });
       toast.success('✅ Scenario saved to library');
       setScenarioName('');
     } catch { toast.error('Failed to save scenario'); }
@@ -230,10 +297,27 @@ export default function ForecastWorkbench() {
     toast.success(`Corrected ${exc.sku} @ ${exc.branch}`);
   };
 
+  /* Derived segment / subsegment option lists */
+  const segmentOptions = filterCategory.length === 0
+    ? Object.values(SEGMENT_MAP).flat()
+    : filterCategory.flatMap(cat => SEGMENT_MAP[cat] || []);
+
+  const subsegmentOptions = filterSegment.length === 0
+    ? segmentOptions.flatMap(seg => SUBSEGMENT_MAP[seg] || [])
+    : filterSegment.flatMap(seg => SUBSEGMENT_MAP[seg] || []);
+
+  /* Segment / subsegment filtered result */
+  const effResult = result ? result.filter(r => {
+    const sd = SKU_DETAILS[r.sku] || {};
+    if (filterSegment.length > 0 && !filterSegment.includes(sd.segment)) return false;
+    if (filterSubsegment.length > 0 && !filterSubsegment.includes(sd.subsegment)) return false;
+    return true;
+  }) : null;
+
   /* Chart data + line keys */
-  const allLineKeys = result ? (() => {
+  const allLineKeys = effResult ? (() => {
     const totals = {};
-    result.forEach(r => { const k=`${r.sku} — ${r.branch}`; totals[k]=(totals[k]||0)+r.value; });
+    effResult.forEach(r => { const k=`${r.sku} — ${r.branch}`; totals[k]=(totals[k]||0)+r.value; });
     return Object.entries(totals).sort((a,b)=>b[1]-a[1]).map(([k])=>k);
   })() : [];
 
@@ -246,9 +330,9 @@ export default function ForecastWorkbench() {
     'All': [],
   };
 
-  const chartData = result ? (() => {
+  const chartData = effResult ? (() => {
     const grouped = {};
-    result.forEach(r => {
+    effResult.forEach(r => {
       const key = `${r.sku} — ${r.branch}`;
       if (!activeLines.includes(key)) return;
       const lbl = r.month.replace('-2026',"'26").replace('-2025',"'25");
@@ -259,25 +343,29 @@ export default function ForecastWorkbench() {
     return Object.values(grouped);
   })() : [];
 
-  /* Table data per forecast level */
-  const tableData = result ? (() => {
+  /* Table data per forecast level — uses effResult so segment/subsegment filters apply */
+  const tableData = effResult ? (() => {
     if (forecastLevel === 'branch_sku') {
       const m = {};
-      result.forEach(r => { const k=`${r.branch}|${r.sku}`; if(!m[k]) m[k]={branch:r.branch,sku:r.sku,months:{}}; m[k].months[r.month]=r.value; });
+      effResult.forEach(r => {
+        const k=`${r.branch}|${r.sku}`;
+        if(!m[k]) m[k]={ branch:r.branch, sku:r.sku, cat:r.category||CAT_MAP[r.sku]||'', segment:r.segment||SKU_DETAILS[r.sku]?.segment||'', subsegment:r.subsegment||SKU_DETAILS[r.sku]?.subsegment||'', months:{} };
+        m[k].months[r.month]=r.value;
+      });
       return Object.values(m);
     }
     if (forecastLevel === 'branch_category') {
       const m = {};
-      result.forEach(r => { const cat=CAT_MAP[r.sku]||r.sku; const k=`${r.branch}|${cat}`; if(!m[k]) m[k]={branch:r.branch,sku:cat,months:{}}; m[k].months[r.month]=(m[k].months[r.month]||0)+r.value; });
+      effResult.forEach(r => { const cat=CAT_MAP[r.sku]||r.sku; const k=`${r.branch}|${cat}`; if(!m[k]) m[k]={branch:r.branch,sku:cat,months:{}}; m[k].months[r.month]=(m[k].months[r.month]||0)+r.value; });
       return Object.values(m);
     }
     if (forecastLevel === 'national_category') {
       const m = {};
-      result.forEach(r => { const cat=CAT_MAP[r.sku]||r.sku; if(!m[cat]) m[cat]={branch:'National',sku:cat,months:{}}; m[cat].months[r.month]=(m[cat].months[r.month]||0)+r.value; });
+      effResult.forEach(r => { const cat=CAT_MAP[r.sku]||r.sku; if(!m[cat]) m[cat]={branch:'National',sku:cat,months:{}}; m[cat].months[r.month]=(m[cat].months[r.month]||0)+r.value; });
       return Object.values(m);
     }
     const t = { branch:'National', sku:'All Categories', months:{} };
-    result.forEach(r => { t.months[r.month]=(t.months[r.month]||0)+r.value; });
+    effResult.forEach(r => { t.months[r.month]=(t.months[r.month]||0)+r.value; });
     return [t];
   })() : [];
 
@@ -308,6 +396,14 @@ export default function ForecastWorkbench() {
           <MultiSelectDropdown label="Categories" options={CATEGORIES} selected={filterCategory} onChange={setFilterCategory}/>
         </div>
         <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+          <span style={{ fontSize:10, fontWeight:600, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:'0.05em' }}>Segment</span>
+          <MultiSelectDropdown label="Segments" options={segmentOptions} selected={filterSegment} onChange={setFilterSegment}/>
+        </div>
+        <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+          <span style={{ fontSize:10, fontWeight:600, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:'0.05em' }}>Subsegment</span>
+          <MultiSelectDropdown label="Subsegments" options={subsegmentOptions} selected={filterSubsegment} onChange={setFilterSubsegment}/>
+        </div>
+        <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
           <span style={{ fontSize:10, fontWeight:600, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:'0.05em' }}>Product</span>
           <MultiSelectDropdown label="SKUs" options={SKUS} selected={filterSku} onChange={setFilterSku}/>
         </div>
@@ -330,7 +426,7 @@ export default function ForecastWorkbench() {
       </div>
 
       {/* Active filter pills */}
-      {(filterBranch.length > 0 || filterCategory.length > 0 || filterSku.length > 0) && (
+      {(filterBranch.length > 0 || filterCategory.length > 0 || filterSegment.length > 0 || filterSubsegment.length > 0 || filterSku.length > 0) && (
         <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginBottom:10 }}>
           <span style={{ fontSize:11, color:'var(--text-3)', alignSelf:'center' }}>Active filters:</span>
           {filterBranch.map(b => (
@@ -341,6 +437,16 @@ export default function ForecastWorkbench() {
           {filterCategory.map(c => (
             <span key={c} style={{ background:'#F0FDF4', color:'#15803D', border:'1px solid #BBF7D0', borderRadius:12, padding:'2px 8px', fontSize:11, fontWeight:600, display:'flex', alignItems:'center', gap:4 }}>
               {c} <button onClick={() => setFilterCategory(v=>v.filter(x=>x!==c))} style={{ background:'none', border:'none', cursor:'pointer', padding:0, lineHeight:1, fontSize:14, color:'#15803D' }}>×</button>
+            </span>
+          ))}
+          {filterSegment.map(s => (
+            <span key={s} style={{ background:'#F0FDFA', color:'#0F766E', border:'1px solid #99F6E4', borderRadius:12, padding:'2px 8px', fontSize:11, fontWeight:600, display:'flex', alignItems:'center', gap:4 }}>
+              {s} <button onClick={() => setFilterSegment(v=>v.filter(x=>x!==s))} style={{ background:'none', border:'none', cursor:'pointer', padding:0, lineHeight:1, fontSize:14, color:'#0F766E' }}>×</button>
+            </span>
+          ))}
+          {filterSubsegment.map(s => (
+            <span key={s} style={{ background:'#FDF4FF', color:'#7C3AED', border:'1px solid #E9D5FF', borderRadius:12, padding:'2px 8px', fontSize:11, fontWeight:600, display:'flex', alignItems:'center', gap:4 }}>
+              {s} <button onClick={() => setFilterSubsegment(v=>v.filter(x=>x!==s))} style={{ background:'none', border:'none', cursor:'pointer', padding:0, lineHeight:1, fontSize:14, color:'#7C3AED' }}>×</button>
             </span>
           ))}
           {filterSku.map(s => (
@@ -520,7 +626,7 @@ export default function ForecastWorkbench() {
                   </div>
                   <div style={{ display:'flex', gap:6, alignItems:'center' }}>
                     {view === 'table' && (
-                      <button onClick={() => { downloadCSV(tableData, `WhirlCast_workbench_${new Date().toISOString().slice(0,10)}.csv`); toast.success('CSV downloaded'); }}
+                      <button onClick={() => { downloadCSV(tableData, `WhirlCast_workbench_${new Date().toISOString().slice(0,10)}.csv`, forecastLevel === 'branch_sku'); toast.success('CSV downloaded'); }}
                         style={{ background:'var(--bg)', border:'0.5px solid var(--border)', borderRadius:7, padding:'5px 10px', fontSize:11, cursor:'pointer', display:'flex', alignItems:'center', gap:4, color:'var(--text-1)' }}>
                         <Download size={12}/> Export CSV
                       </button>
@@ -611,11 +717,18 @@ export default function ForecastWorkbench() {
 
                 {view === 'table' && (
                   <div style={{ overflowX:'auto', maxHeight:360, overflowY:'auto' }}>
-                    <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+                    <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth: forecastLevel === 'branch_sku' ? 1300 : 800 }}>
                       <thead>
                         <tr style={{ background:'#F8FAFF', position:'sticky', top:0, zIndex:1 }}>
-                          <th style={{ ...thStyle, position:'sticky', left:0,  background:'#F8FAFF', zIndex:2, textAlign:'left' }}>Branch</th>
-                          <th style={{ ...thStyle, position:'sticky', left:90, background:'#F8FAFF', zIndex:2, textAlign:'left' }}>SKU / Category</th>
+                          <th style={{ ...thStyle, position:'sticky', left:0,  background:'#F8FAFF', zIndex:2, textAlign:'left', minWidth:90 }}>Branch</th>
+                          <th style={{ ...thStyle, position:'sticky', left:90, background:'#F8FAFF', zIndex:2, textAlign:'left', minWidth:140 }}>
+                            {forecastLevel === 'branch_sku' ? 'SKU' : 'SKU / Category'}
+                          </th>
+                          {forecastLevel === 'branch_sku' && <>
+                            <th style={{ ...thStyle, textAlign:'left', minWidth:130 }}>Category</th>
+                            <th style={{ ...thStyle, textAlign:'left', minWidth:110 }}>Segment</th>
+                            <th style={{ ...thStyle, textAlign:'left', minWidth:120 }}>Subsegment</th>
+                          </>}
                           {MONTH_LBL.map(m => <th key={m} style={thStyle}>{m}</th>)}
                           <th style={{ ...thStyle, background:'var(--navy-accent)', color:'white' }}>6M Total</th>
                         </tr>
@@ -629,7 +742,12 @@ export default function ForecastWorkbench() {
                               onMouseEnter={e => e.currentTarget.style.background='#F5F8FF'}
                               onMouseLeave={e => e.currentTarget.style.background=i%2===0?'var(--card)':'#FAFAFA'}>
                               <td style={{ ...tdStyle, position:'sticky', left:0,  background:'inherit', textAlign:'left', fontWeight:600 }}>{row.branch}</td>
-                              <td style={{ ...tdStyle, position:'sticky', left:90, background:'inherit', textAlign:'left', fontSize:11, color:'var(--text-2)' }}>{row.sku}</td>
+                              <td style={{ ...tdStyle, position:'sticky', left:90, background:'inherit', textAlign:'left', fontSize:11, color:'var(--text-2)', fontFamily: forecastLevel === 'branch_sku' ? 'monospace' : 'inherit' }}>{row.sku}</td>
+                              {forecastLevel === 'branch_sku' && <>
+                                <td style={{ ...tdStyle, textAlign:'left' }}><CatBadge cat={row.cat}/></td>
+                                <td style={{ ...tdStyle, textAlign:'left', fontSize:11 }}>{row.segment}</td>
+                                <td style={{ ...tdStyle, textAlign:'left', fontSize:11 }}>{row.subsegment}</td>
+                              </>}
                               {vals.map((v,vi) => {
                                 const key = `${row.branch}|${row.sku}|${MONTHS_FWD[vi]}`;
                                 const corr = correctedCells[key];

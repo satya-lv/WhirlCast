@@ -26,28 +26,17 @@ router.post('/compare', (req, res) => {
 
     const scenarios = scenario_ids.map(id => db.prepare(`SELECT * FROM forecast_scenarios WHERE scenario_id=?`).get(id)).filter(Boolean);
 
-    /* Fallback: finalized scenario values for zero-fill */
-    const cycle = db.prepare(`SELECT * FROM forecast_cycles ORDER BY cycle_id DESC LIMIT 1`).get();
-    const finalized = db.prepare(`SELECT * FROM forecast_scenarios WHERE cycle_id=? AND status='finalized' LIMIT 1`).get(cycle.cycle_id);
-    const fbRuns = finalized
-      ? db.prepare(`SELECT branch, sku, month, value FROM forecast_runs WHERE scenario_id=? AND month IN ('06-2026','07-2026','08-2026','09-2026','10-2026','11-2026')`).all(finalized.scenario_id)
-      : [];
-    const fallbackMap = {};
-    fbRuns.forEach(r => { fallbackMap[`${r.branch}|${r.sku}|${r.month}`] = r.value; });
-
-    /* Per-scenario data */
+    /* Strictly query only the requested scenario_ids — no fallback to finalized or any other scenario */
     const comparisonData = scenarios.map(s => {
       const runs = db.prepare(
         `SELECT branch, sku, month, value FROM forecast_runs WHERE scenario_id=? AND month IN ('06-2026','07-2026','08-2026','09-2026','10-2026','11-2026')`
       ).all(s.scenario_id);
 
-      /* Branch×month totals for the trend chart */
       const branchData = {};
       BRANCHES.forEach(b => {
         const md = {};
         MONTHS_FWD.forEach(m => {
-          const sum = runs.filter(r => r.branch === b && r.month === m).reduce((a, r) => a + r.value, 0);
-          md[m] = sum || SKUS.reduce((a, sku) => a + (fallbackMap[`${b}|${sku}|${m}`] || 0), 0);
+          md[m] = runs.filter(r => r.branch === b && r.month === m).reduce((a, r) => a + r.value, 0);
         });
         branchData[b] = md;
       });
@@ -55,8 +44,7 @@ router.post('/compare', (req, res) => {
       return { ...s, branchData, runs };
     });
 
-    /* Accuracy & bias trend (simulated variation around scenario values) */
-    const trendData = MONTHS_FWD.map(month => {
+    const trendData = MONTHS_FWD.map((month, mi) => {
       const obj = { month };
       scenarios.forEach((s, si) => {
         obj[`accuracy_s${si+1}`] = Math.round((s.accuracy || 85) + (Math.random() * 4 - 2));
@@ -66,7 +54,23 @@ router.post('/compare', (req, res) => {
     });
 
     db.close();
-    res.json({ scenarios: comparisonData, trendData, fallbackMap });
+    res.json({ scenarios: comparisonData, trendData, fallbackMap: {} });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/:id', (req, res) => {
+  try {
+    const db = getDb();
+    const id = parseInt(req.params.id);
+    const scenario = db.prepare(`SELECT * FROM forecast_scenarios WHERE scenario_id=?`).get(id);
+    if (!scenario) return res.status(404).json({ error: 'Scenario not found' });
+    if (scenario.status === 'finalized') return res.status(400).json({ error: 'Cannot delete a finalized scenario' });
+    db.prepare(`DELETE FROM forecast_runs WHERE scenario_id=?`).run(id);
+    db.prepare(`DELETE FROM forecast_scenarios WHERE scenario_id=?`).run(id);
+    db.close();
+    res.json({ message: 'Scenario deleted', scenario_id: id });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
