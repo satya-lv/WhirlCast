@@ -52,6 +52,19 @@ const SEED_CAT_BASE = { 'Direct Cool Refrigerator':1800,'Frost Free Refrigerator
 const BRANCH_FACTORS_OC = { 'Mumbai':1.25,'New Delhi':1.22,'Kolkata':0.95,'Chennai':1.05,'Bangalore':1.08,'Hyderabad':0.98,'Pune':0.88,'Ahmedabad':0.85 };
 const seedAI = (cat, branch) => Math.round((SEED_CAT_BASE[cat]||1000) * (BRANCH_FACTORS_OC[branch]||1.0));
 
+const SKU_META = {
+  'REF_190L_DirectCool': { segment:'180-200L',  subsegment:'Single Door' },
+  'REF_240L_FrostFree':  { segment:'240L',       subsegment:'Double Door' },
+  'REF_340L_TripleDoor': { segment:'340L',       subsegment:'Triple Door' },
+  'WM_7KG_TopLoad':      { segment:'7KG',        subsegment:'Top Load' },
+  'WM_8KG_FrontLoad':    { segment:'8KG',        subsegment:'Front Load' },
+  'WM_6.5KG_SemiAuto':   { segment:'6.5KG',      subsegment:'Semi-Automatic' },
+  'AC_1.5T_Inverter':    { segment:'1.5 Ton',    subsegment:'Inverter Split' },
+  'AC_2.0T_Split':       { segment:'2.0 Ton',    subsegment:'Split' },
+  'MW_25L_Convection':   { segment:'25L',        subsegment:'Convection' },
+  'IH_3B_SmartGlass':    { segment:'3 Burner',   subsegment:'Smart Glass' },
+};
+
 const CatBadge = ({ cat }) => {
   const c = CAT_COLORS[cat] || { bg:'F3F4F6', text:'374151' };
   return <span style={{ background:`#${c.bg}`, color:`#${c.text}`, fontSize:9, fontWeight:600, padding:'1px 6px', borderRadius:20 }}>{cat}</span>;
@@ -510,10 +523,12 @@ export default function OverrideConflicts() {
       {/* ══════════════════════════════════ NATIONAL VIEW ══════════════════════════════════ */}
       {activeTab === 'national' && (
         <div>
-          {/* Top instruction */}
-          <div style={{ background:'#EFF6FF', border:'1px solid #BFDBFE', borderRadius:8, padding:'10px 16px', marginBottom:16, fontSize:13, color:'#1D4ED8', fontWeight:500, display:'flex', alignItems:'center', gap:8 }}>
-            <span>✏️</span> Edit at any level — changes cascade proportionally to individual SKUs automatically.
-          </div>
+          {/* Top instruction — editable path only */}
+          {!isReadOnly && (
+            <div style={{ background:'#EFF6FF', border:'1px solid #BFDBFE', borderRadius:8, padding:'10px 16px', marginBottom:16, fontSize:13, color:'#1D4ED8', fontWeight:500, display:'flex', alignItems:'center', gap:8 }}>
+              <span>✏️</span> Edit at any level — changes cascade proportionally to individual SKUs automatically.
+            </div>
+          )}
 
           {/* ── Editable grid ── */}
           <div style={{ background:'var(--card)', borderRadius:12, boxShadow:'var(--shadow-sm)', border:'0.5px solid var(--border)', marginBottom:20, overflowX:'auto' }}>
@@ -550,12 +565,12 @@ export default function OverrideConflicts() {
                         <span title={cat}>{cat.length > 22 ? cat.split(' ').slice(0,2).join(' ') : cat}</span>
                       </div>
 
-                      {/* Month cells — editable when expanded; read-only aggregate when collapsed */}
+                      {/* Month cells — editable (category_team, expanded only); plain text otherwise */}
                       {MONTHS_FWD.map((m, mi) => {
                         const catMonthVal = getCatMonthEff(cat, m);
                         return (
                           <div key={m} style={{textAlign:'center', padding:'0 2px'}}>
-                            {isCatOpen
+                            {isCatOpen && !isReadOnly
                               ? renderInput(`cat_m|${cat}|${m}`, catMonthVal, (n) => cascadeCatMonth(cat, m, n), true, hasCatEdit)
                               : <span style={{fontSize:11, color:'#6B7280'}}>{catMonthVal.toLocaleString('en-IN')}</span>
                             }
@@ -563,9 +578,9 @@ export default function OverrideConflicts() {
                         );
                       })}
 
-                      {/* 6M Total — editable when collapsed; auto-sum when expanded */}
+                      {/* 6M Total — editable (category_team, collapsed only); plain text otherwise */}
                       <div style={{textAlign:'right', paddingRight:4}}>
-                        {isCatOpen
+                        {isReadOnly || isCatOpen
                           ? <span style={{fontSize:12, fontWeight:700, color:'#1B3A6B'}}>{cat6M.toLocaleString('en-IN')}</span>
                           : renderInput(`cat6m|${cat}`, cat6M, (n) => cascadeCat6M(cat, n), false, hasCatEdit)
                         }
@@ -581,9 +596,9 @@ export default function OverrideConflicts() {
                         </span>
                       </div>
 
-                      {/* Save button */}
+                      {/* Save button — category_team only */}
                       <div style={{textAlign:'center'}}>
-                        {hasCatEdit && (
+                        {!isReadOnly && hasCatEdit && (
                           <button
                             onClick={() => saveCategoryEdits(cat)}
                             disabled={savingCat === cat}
@@ -618,7 +633,10 @@ export default function OverrideConflicts() {
                               const brMonthVal = getBranchMonthEff(cat, branch, m);
                               return (
                                 <div key={m} style={{textAlign:'center', padding:'0 2px'}}>
-                                  {renderInput(`br_m|${cat}|${branch}|${m}`, brMonthVal, (n) => cascadeBranchMonth(cat, branch, m, n), true, hasBrEdit)}
+                                  {isReadOnly
+                                    ? <span style={{fontSize:11, color:'#6B7280'}}>{brMonthVal.toLocaleString('en-IN')}</span>
+                                    : renderInput(`br_m|${cat}|${branch}|${m}`, brMonthVal, (n) => cascadeBranchMonth(cat, branch, m, n), true, hasBrEdit)
+                                  }
                                 </div>
                               );
                             })}
@@ -633,7 +651,7 @@ export default function OverrideConflicts() {
                             </div>
 
                             <div style={{textAlign:'center'}}>
-                              {hasBrEdit && (
+                              {!isReadOnly && hasBrEdit && (
                                 <button onClick={() => saveCategoryEdits(cat)} disabled={savingCat===cat}
                                   style={{ background:'#1B3A6B', color:'white', border:'none', borderRadius:6, padding:'4px 12px', fontSize:11, cursor:'pointer', fontFamily:'Inter', fontWeight:600 }}>
                                   {savingCat===cat?'…':'Save'}
@@ -654,13 +672,21 @@ export default function OverrideConflicts() {
                             return (
                               <div key={sku} style={{ display:'grid', gridTemplateColumns:GRID_TPL, padding:'5px 12px', background:si%2===0?'#FAFBFF':'#F0F4FF', borderBottom:'0.5px solid #EEF0F4', alignItems:'center' }}>
 
-                                <div style={{ paddingLeft:40, fontSize:10, fontFamily:'monospace', color:'#6B7280', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={sku}>
-                                  {sku}
+                                <div style={{ paddingLeft:40, overflow:'hidden' }}>
+                                  <div style={{ fontSize:10, fontFamily:'monospace', color:'#6B7280', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={sku}>{sku}</div>
+                                  {SKU_META[sku] && (
+                                    <div style={{ fontSize:9, color:'#9CA3AF', marginTop:1, whiteSpace:'nowrap' }}>
+                                      {SKU_META[sku].segment} · {SKU_META[sku].subsegment}
+                                    </div>
+                                  )}
                                 </div>
 
                                 {MONTHS_FWD.map(m => (
                                   <div key={m} style={{textAlign:'center', padding:'0 2px'}}>
-                                    {renderInput(`${branch}|${sku}|${m}`, getEff(branch, sku, m), (n) => setSkuEdit(branch, sku, m, n), true)}
+                                    {isReadOnly
+                                      ? <span style={{fontSize:11, color:'#6B7280'}}>{getEff(branch, sku, m).toLocaleString('en-IN')}</span>
+                                      : renderInput(`${branch}|${sku}|${m}`, getEff(branch, sku, m), (n) => setSkuEdit(branch, sku, m, n), true)
+                                    }
                                   </div>
                                 ))}
 
@@ -684,7 +710,7 @@ export default function OverrideConflicts() {
                                       {ovrMeta.status}
                                     </span>
                                   ) : (
-                                    skuEdit ? (
+                                    !isReadOnly && skuEdit ? (
                                       <button onClick={() => saveCategoryEdits(cat)} disabled={savingCat===cat}
                                         style={{ background:'#1B3A6B', color:'white', border:'none', borderRadius:5, padding:'3px 8px', fontSize:10, cursor:'pointer', fontFamily:'Inter', fontWeight:600 }}>
                                         {savingCat===cat?'…':'Save'}
@@ -710,8 +736,8 @@ export default function OverrideConflicts() {
             </div>
           </div>
 
-          {/* Global save / discard */}
-          {Object.keys(edits).length > 0 && (
+          {/* Global save / discard — category_team only */}
+          {!isReadOnly && Object.keys(edits).length > 0 && (
             <div style={{ display:'flex', justifyContent:'flex-end', gap:8, marginBottom:16 }}>
               <button onClick={() => setEdits({})} style={{ background:'var(--bg)', border:'0.5px solid var(--border)', borderRadius:8, padding:'8px 16px', fontSize:12, cursor:'pointer', color:'var(--text-2)' }}>
                 Discard All Changes
@@ -860,7 +886,10 @@ export default function OverrideConflicts() {
                             </div>
                           </td>
                           <td style={{ padding:'10px 12px' }}>
-                            <div style={{ fontSize:11, color:'#6B7280', marginBottom:3 }}>{ov.sku}</div>
+                            <div style={{ fontSize:11, color:'#6B7280', marginBottom:2 }}>{ov.sku}</div>
+                            {SKU_META[ov.sku] && (
+                              <div style={{ fontSize:9, color:'#9CA3AF', marginBottom:3 }}>{SKU_META[ov.sku].segment} · {SKU_META[ov.sku].subsegment}</div>
+                            )}
                             <CatBadge cat={CAT_MAP[ov.sku] || 'Other'}/>
                           </td>
                           <td style={{ padding:'10px 12px', whiteSpace:'nowrap' }}>{ov.month?.replace('-2026',"'26")}</td>

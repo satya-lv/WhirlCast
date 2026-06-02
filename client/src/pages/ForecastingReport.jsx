@@ -31,6 +31,18 @@ const CAT_MAP = {
   'AC_1.5T_Inverter':'Air Conditioner',             'AC_2.0T_Split':'Air Conditioner',
   'MW_25L_Convection':'Microwave',                  'IH_3B_SmartGlass':'Induction',
 };
+const SKU_META = {
+  'REF_190L_DirectCool': { segment:'180-200L',  subsegment:'Single Door' },
+  'REF_240L_FrostFree':  { segment:'240L',       subsegment:'Double Door' },
+  'REF_340L_TripleDoor': { segment:'340L',       subsegment:'Triple Door' },
+  'WM_7KG_TopLoad':      { segment:'7KG',        subsegment:'Top Load' },
+  'WM_8KG_FrontLoad':    { segment:'8KG',        subsegment:'Front Load' },
+  'WM_6.5KG_SemiAuto':   { segment:'6.5KG',      subsegment:'Semi-Automatic' },
+  'AC_1.5T_Inverter':    { segment:'1.5 Ton',    subsegment:'Inverter Split' },
+  'AC_2.0T_Split':       { segment:'2.0 Ton',    subsegment:'Split' },
+  'MW_25L_Convection':   { segment:'25L',        subsegment:'Convection' },
+  'IH_3B_SmartGlass':    { segment:'3 Burner',   subsegment:'Smart Glass' },
+};
 
 const BRANCH_ACC = {
   'Mumbai':    { acc:91.0, bias:2.3 }, 'New Delhi': { acc:85.1, bias:6.9 },
@@ -147,10 +159,10 @@ export default function ForecastingReport() {
   const { toast } = useToast();
   const isMobile  = useIsMobile();
 
-  const defaultView = user?.role === 'branch_sales' ? 'branch'
-    : user?.role === 'category_team' ? 'category' : 'branch_sku';
+  const isBranchSales = user?.role === 'branch_sales';
+  const myBranch      = user?.branch || 'Mumbai';
 
-  const [viewMode, setViewMode]       = useState(defaultView);
+  const [viewMode, setViewMode]       = useState('branch_sku');
   const [data, setData]               = useState(null);
   const [expandedRow, setExpandedRow] = useState(null);
   const [trendTimeRange, setTrendTimeRange] = useState('All');
@@ -158,11 +170,12 @@ export default function ForecastingReport() {
   const [showBranchMenu, setShowBranchMenu] = useState(false);
 
   useEffect(() => {
-    const load = () => fetch('/api/report').then(r => r.json()).then(setData).catch(console.error);
+    const url = isBranchSales ? `/api/report?branch=${encodeURIComponent(myBranch)}` : '/api/report';
+    const load = () => fetch(url).then(r => r.json()).then(setData).catch(console.error);
     load();
     const id = setInterval(load, 30000);
     return () => clearInterval(id);
-  }, []);
+  }, [isBranchSales, myBranch]);
 
   if (!data) return (
     <div style={{ display:'flex', justifyContent:'center', alignItems:'center', height:400, background:'var(--bg)' }}>
@@ -193,7 +206,7 @@ export default function ForecastingReport() {
   const bskuMap = {};
   ffData.forEach(r => {
     const key = `${r.branch}|${r.sku}`;
-    if (!bskuMap[key]) bskuMap[key] = { branch:r.branch, sku:r.sku, cat:CAT_MAP[r.sku]||'', months:{} };
+    if (!bskuMap[key]) bskuMap[key] = { branch:r.branch, sku:r.sku, cat:r.category||CAT_MAP[r.sku]||'', segment:r.segment||SKU_META[r.sku]?.segment||'', subsegment:r.subsegment||SKU_META[r.sku]?.subsegment||'', months:{} };
     bskuMap[key].months[r.month] = r.value;
   });
   const allBskuRows = Object.values(bskuMap);
@@ -286,10 +299,10 @@ export default function ForecastingReport() {
       );
     } else {
       downloadCSV(
-        ['Branch', 'SKU', 'Category', ...monthCols, 'Total'],
+        ['Branch', 'SKU', 'Category', 'Segment', 'Subsegment', ...monthCols, 'Total'],
         allBskuRows.map(r => {
           const vals  = MONTHS_FWD.map(m => overrideMap[r.branch]?.[r.sku]?.[m] ?? r.months[m] ?? 0);
-          return [r.branch, r.sku, r.cat, ...vals, vals.reduce((s,v) => s+v, 0)];
+          return [r.branch, r.sku, r.cat, r.segment||'', r.subsegment||'', ...vals, vals.reduce((s,v) => s+v, 0)];
         }),
         filename
       );
@@ -322,9 +335,9 @@ export default function ForecastingReport() {
       />
 
       {/* Role banners */}
-      {user?.role === 'branch_sales' && (
+      {isBranchSales && (
         <div style={{ background:'#FEF3C7', border:'1px solid #FCD34D', borderRadius:10, padding:'10px 16px', marginBottom:14, display:'flex', alignItems:'center', gap:8, fontSize:13, fontWeight:600, color:'#92400E' }}>
-          <span>📍</span> {user.branch} Branch Report — Read Only
+          <span>📍</span> {myBranch} Branch Report — Showing forecast for your branch only.
         </div>
       )}
       {user?.role === 'category_team' && (
@@ -347,24 +360,26 @@ export default function ForecastingReport() {
         </div>
       )}
 
-      {/* 2. View toggle + 3. Export */}
+      {/* 2. View toggle (hidden for branch_sales) + 3. Export */}
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20, flexWrap:'wrap', gap:8 }}>
-        <div style={{ display:'flex', gap:4, background:'var(--card)', borderRadius:12, padding:4, boxShadow:'var(--shadow-sm)', border:'0.5px solid var(--border)' }}>
-          {ALL_VIEWS.map(tab => (
-            <button key={tab.id}
-              onClick={() => { setViewMode(tab.id); setExpandedRow(null); }}
-              style={{
-                padding: isMobile ? '7px 10px' : '8px 16px',
-                borderRadius:9, fontSize:12,
-                fontWeight: viewMode === tab.id ? 700 : 400,
-                background: viewMode === tab.id ? 'var(--navy-accent)' : 'transparent',
-                color:      viewMode === tab.id ? 'white' : 'var(--text-2)',
-                border:'none', cursor:'pointer', transition:'all 0.15s', whiteSpace:'nowrap',
-              }}>
-              {isMobile ? tab.label.replace(/^.+ /,'') : tab.label}
-            </button>
-          ))}
-        </div>
+        {!isBranchSales ? (
+          <div style={{ display:'flex', gap:4, background:'var(--card)', borderRadius:12, padding:4, boxShadow:'var(--shadow-sm)', border:'0.5px solid var(--border)' }}>
+            {ALL_VIEWS.map(tab => (
+              <button key={tab.id}
+                onClick={() => { setViewMode(tab.id); setExpandedRow(null); }}
+                style={{
+                  padding: isMobile ? '7px 10px' : '8px 16px',
+                  borderRadius:9, fontSize:12,
+                  fontWeight: viewMode === tab.id ? 700 : 400,
+                  background: viewMode === tab.id ? 'var(--navy-accent)' : 'transparent',
+                  color:      viewMode === tab.id ? 'white' : 'var(--text-2)',
+                  border:'none', cursor:'pointer', transition:'all 0.15s', whiteSpace:'nowrap',
+                }}>
+                {isMobile ? tab.label.replace(/^.+ /,'') : tab.label}
+              </button>
+            ))}
+          </div>
+        ) : <div/>}
         <button onClick={exportTable}
           style={{ background:'var(--card)', border:'0.5px solid var(--border)', borderRadius:8, padding:'8px 14px', fontSize:12, cursor:'pointer', display:'flex', alignItems:'center', gap:6, color:'var(--text-1)', boxShadow:'var(--shadow-sm)' }}>
           <Download size={13}/> Export CSV
@@ -380,7 +395,7 @@ export default function ForecastingReport() {
               {viewMode === 'india_total' ? 'All India Aggregate'
                 : viewMode === 'category' ? 'By Category — click a row to expand branches'
                 : viewMode === 'branch'   ? 'By Branch — click a row to expand categories'
-                : 'Branch × SKU · all 80 combinations'}
+                : isBranchSales ? `${myBranch} · 10 SKUs · Branch × SKU level` : 'Branch × SKU · all 80 combinations'}
             </span>
           </h3>
           {viewMode === 'branch_sku' && (
@@ -455,12 +470,14 @@ export default function ForecastingReport() {
         {/* Branch × SKU */}
         {viewMode === 'branch_sku' && (
           <div style={{ overflowX:'auto', maxHeight:460, overflowY:'auto' }}>
-            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth:960 }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth: isBranchSales ? 1050 : 1200 }}>
               <thead>
                 <tr style={{ background:'#F8FAFC', position:'sticky', top:0, zIndex:1 }}>
-                  <th style={{ ...thStyle, textAlign:'left', position:'sticky', left:0,   background:'#F8FAFC', zIndex:2, minWidth:90 }}>Branch</th>
-                  <th style={{ ...thStyle, textAlign:'left', position:'sticky', left:90,  background:'#F8FAFC', zIndex:2, minWidth:140 }}>SKU</th>
-                  <th style={{ ...thStyle, textAlign:'left', position:'sticky', left:230, background:'#F8FAFC', zIndex:2, minWidth:160 }}>Category</th>
+                  {!isBranchSales && <th style={{ ...thStyle, textAlign:'left', position:'sticky', left:0,   background:'#F8FAFC', zIndex:2, minWidth:90 }}>Branch</th>}
+                  <th style={{ ...thStyle, textAlign:'left', position:'sticky', left: isBranchSales?0:90,  background:'#F8FAFC', zIndex:2, minWidth:140 }}>SKU</th>
+                  <th style={{ ...thStyle, textAlign:'left', position:'sticky', left: isBranchSales?140:230, background:'#F8FAFC', zIndex:2, minWidth:160 }}>Category</th>
+                  <th style={{ ...thStyle, textAlign:'left', minWidth:120 }}>Segment</th>
+                  <th style={{ ...thStyle, textAlign:'left', minWidth:130 }}>Subsegment</th>
                   {MONTH_LABELS.map(m => <th key={m} style={thStyle}>{m}</th>)}
                   <th style={{ ...thStyle, background:'var(--navy-accent)', color:'white' }}>Total</th>
                 </tr>
@@ -474,9 +491,11 @@ export default function ForecastingReport() {
                       style={{ background: ri % 2 === 0 ? 'var(--card)' : '#FAFAFA' }}
                       onMouseEnter={e => e.currentTarget.style.background = '#F5F8FF'}
                       onMouseLeave={e => e.currentTarget.style.background = ri % 2 === 0 ? 'var(--card)' : '#FAFAFA'}>
-                      <td style={{ ...tdStyle, textAlign:'left', position:'sticky', left:0,   background:'inherit', fontWeight:600 }}>{row.branch}</td>
-                      <td style={{ ...tdStyle, textAlign:'left', position:'sticky', left:90,  background:'inherit', fontSize:11, color:'var(--text-2)', fontFamily:'monospace' }}>{row.sku}</td>
-                      <td style={{ ...tdStyle, textAlign:'left', position:'sticky', left:230, background:'inherit' }}><CatBadge cat={row.cat}/></td>
+                      {!isBranchSales && <td style={{ ...tdStyle, textAlign:'left', position:'sticky', left:0, background:'inherit', fontWeight:600 }}>{row.branch}</td>}
+                      <td style={{ ...tdStyle, textAlign:'left', position:'sticky', left: isBranchSales?0:90,  background:'inherit', fontSize:11, color:'var(--text-2)', fontFamily:'monospace' }}>{row.sku}</td>
+                      <td style={{ ...tdStyle, textAlign:'left', position:'sticky', left: isBranchSales?140:230, background:'inherit' }}><CatBadge cat={row.cat}/></td>
+                      <td style={{ ...tdStyle, textAlign:'left', fontSize:11 }}>{row.segment}</td>
+                      <td style={{ ...tdStyle, textAlign:'left', fontSize:11 }}>{row.subsegment}</td>
                       {MONTHS_FWD.map((m, mi) => {
                         const hasOv = overrideMap[row.branch]?.[row.sku]?.[m] !== undefined;
                         return (
@@ -498,10 +517,12 @@ export default function ForecastingReport() {
 
       {/* 5. KPI cards */}
       <div style={{ display:'grid', gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : 'repeat(4,1fr)', gap:16, marginBottom:24 }}>
-        <KPICard title="Predicted Sales"   value={(kpis.totalUnits||124850).toLocaleString('en-IN')} trend={`↑ ${kpis.unitsTrend||8.2}%`}             trendDirection="up"   sparklineData={sparkUp}   borderColor="var(--navy-accent)" />
-        <KPICard title="Forecast Accuracy" value={`${kpis.accuracy||87.3}%`}                          trend={`↓ ${Math.abs(kpis.accuracyTrend||1.2)}%`} trendDirection="down" sparklineData={sparkDown}  borderColor="#D97706" />
-        <KPICard title="Forecast BIAS"     value={`${kpis.bias||3.6}%`}                               trend={`↓ ${Math.abs(kpis.biasTrend||0.6)}%`}     trendDirection="up"   sparklineData={sparkBias}  borderColor="#16A34A" />
-        <KPICard title="Predicted Revenue" value={`₹${kpis.revenue||148.2} Cr`}                       trend={`↑ ${kpis.revenueTrend||11.4}%`}           trendDirection="up"   sparklineData={sparkUp}   borderColor="var(--red)" />
+        <KPICard title="Predicted Sales"
+          subtitle={isBranchSales ? `${myBranch} branch · Branch × SKU level` : undefined}
+          value={(kpis.totalUnits||124850).toLocaleString('en-IN')} trend={`↑ ${kpis.unitsTrend||8.2}%`} trendDirection="up" sparklineData={sparkUp} borderColor="var(--navy-accent)" />
+        <KPICard title="Forecast Accuracy" value={`${kpis.accuracy||87.3}%`}      trend={`↓ ${Math.abs(kpis.accuracyTrend||1.2)}%`} trendDirection="down" sparklineData={sparkDown} borderColor="#D97706" />
+        <KPICard title="Forecast BIAS"     value={`${kpis.bias||3.6}%`}            trend={`↓ ${Math.abs(kpis.biasTrend||0.6)}%`}     trendDirection="up"   sparklineData={sparkBias} borderColor="#16A34A" />
+        <KPICard title="Predicted Revenue" value={`₹${kpis.revenue||148.2} Cr`}   trend={`↑ ${kpis.revenueTrend||11.4}%`}           trendDirection="up"   sparklineData={sparkUp}   borderColor="var(--red)" />
       </div>
 
       {/* 6. Trend chart + 7. Accuracy chart + 8. Category mix */}
@@ -550,34 +571,36 @@ export default function ForecastingReport() {
         </div>
 
         <div style={{ background:'var(--card)', borderRadius:'var(--radius-md)', padding:20, boxShadow:'var(--shadow-sm)', border:'0.5px solid var(--border)' }}>
-          {/* Accuracy chart filter bar */}
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10, gap:8, flexWrap:'wrap' }}>
-            <h3 style={{ margin:0, fontSize:14, fontWeight:600, color:'var(--text-1)' }}>Accuracy by Branch</h3>
-            <div style={{ position:'relative' }}>
-              <button onClick={() => setShowBranchMenu(v => !v)} style={{ background:'var(--card)', border:'0.5px solid var(--border)', borderRadius:7, padding:'4px 10px', fontSize:11, cursor:'pointer', color:'var(--text-1)', display:'flex', alignItems:'center', gap:5 }}>
-                {branchFilter.length === 0 ? 'All Branches' : `${branchFilter.length} selected`} ▾
-              </button>
-              {showBranchMenu && (
-                <div style={{ position:'absolute', top:'calc(100% + 4px)', right:0, zIndex:50, background:'var(--card)', border:'0.5px solid var(--border)', borderRadius:8, boxShadow:'var(--shadow-md)', padding:'6px 0', minWidth:180, maxHeight:220, overflowY:'auto' }}>
-                  <label style={{ display:'flex', alignItems:'center', gap:8, padding:'5px 12px', cursor:'pointer', fontSize:12 }}
-                    onMouseEnter={e => e.currentTarget.style.background='#F5F8FF'} onMouseLeave={e => e.currentTarget.style.background=''}>
-                    <input type="checkbox" checked={branchFilter.length===0} onChange={() => setBranchFilter([])} style={{ accentColor:'#1B3A6B', cursor:'pointer' }}/>
-                    <em style={{ color:'var(--text-2)' }}>All Branches</em>
-                  </label>
-                  {BRANCHES.map(b => (
-                    <label key={b} style={{ display:'flex', alignItems:'center', gap:8, padding:'5px 12px', cursor:'pointer', fontSize:12 }}
+            <h3 style={{ margin:0, fontSize:14, fontWeight:600, color:'var(--text-1)' }}>
+              {isBranchSales ? `${myBranch} — Accuracy by Category` : 'Accuracy by Branch'}
+            </h3>
+            {!isBranchSales && (
+              <div style={{ position:'relative' }}>
+                <button onClick={() => setShowBranchMenu(v => !v)} style={{ background:'var(--card)', border:'0.5px solid var(--border)', borderRadius:7, padding:'4px 10px', fontSize:11, cursor:'pointer', color:'var(--text-1)', display:'flex', alignItems:'center', gap:5 }}>
+                  {branchFilter.length === 0 ? 'All Branches' : `${branchFilter.length} selected`} ▾
+                </button>
+                {showBranchMenu && (
+                  <div style={{ position:'absolute', top:'calc(100% + 4px)', right:0, zIndex:50, background:'var(--card)', border:'0.5px solid var(--border)', borderRadius:8, boxShadow:'var(--shadow-md)', padding:'6px 0', minWidth:180, maxHeight:220, overflowY:'auto' }}>
+                    <label style={{ display:'flex', alignItems:'center', gap:8, padding:'5px 12px', cursor:'pointer', fontSize:12 }}
                       onMouseEnter={e => e.currentTarget.style.background='#F5F8FF'} onMouseLeave={e => e.currentTarget.style.background=''}>
-                      <input type="checkbox" checked={branchFilter.includes(b)} style={{ accentColor:'#1B3A6B', cursor:'pointer' }}
-                        onChange={e => setBranchFilter(v => e.target.checked ? [...v,b] : v.filter(x=>x!==b))}/>
-                      {b}
+                      <input type="checkbox" checked={branchFilter.length===0} onChange={() => setBranchFilter([])} style={{ accentColor:'#1B3A6B', cursor:'pointer' }}/>
+                      <em style={{ color:'var(--text-2)' }}>All Branches</em>
                     </label>
-                  ))}
-                </div>
-              )}
-            </div>
+                    {BRANCHES.map(b => (
+                      <label key={b} style={{ display:'flex', alignItems:'center', gap:8, padding:'5px 12px', cursor:'pointer', fontSize:12 }}
+                        onMouseEnter={e => e.currentTarget.style.background='#F5F8FF'} onMouseLeave={e => e.currentTarget.style.background=''}>
+                        <input type="checkbox" checked={branchFilter.includes(b)} style={{ accentColor:'#1B3A6B', cursor:'pointer' }}
+                          onChange={e => setBranchFilter(v => e.target.checked ? [...v,b] : v.filter(x=>x!==b))}/>
+                        {b}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-          {/* Branch filter pills */}
-          {branchFilter.length > 0 && (
+          {!isBranchSales && branchFilter.length > 0 && (
             <div style={{ display:'flex', flexWrap:'wrap', gap:5, marginBottom:8 }}>
               {branchFilter.map(b => (
                 <span key={b} style={{ background:'#EFF6FF', color:'#1B3A6B', border:'1px solid #BFDBFE', borderRadius:12, padding:'2px 8px', fontSize:10, fontWeight:600, display:'flex', alignItems:'center', gap:4 }}>
@@ -587,17 +610,31 @@ export default function ForecastingReport() {
             </div>
           )}
           <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={(branchFilter.length ? (data.branchAccuracy||[]).filter(b => branchFilter.includes(b.branch)) : data.branchAccuracy||[])} layout="vertical" margin={{top:5,right:30,left:60,bottom:5}}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false}/>
-              <XAxis type="number" domain={[70,100]} tick={{fontSize:9}} tickFormatter={v => `${v}%`}/>
-              <YAxis type="category" dataKey="branch" tick={{fontSize:10,fill:'var(--text-2)'}} width={55}/>
-              <Tooltip formatter={v => `${v}%`}/>
-              <Bar dataKey="accuracy" radius={[0,3,3,0]}>
-                {(data.branchAccuracy||[]).map((e,i) => (
-                  <Cell key={i} fill={e.accuracy >= 85 ? '#16A34A' : e.accuracy >= 80 ? '#D97706' : '#EA580C'}/>
-                ))}
-              </Bar>
-            </BarChart>
+            {isBranchSales ? (
+              <BarChart data={data.categoryAccuracy||[]} layout="vertical" margin={{top:5,right:30,left:100,bottom:5}}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false}/>
+                <XAxis type="number" domain={[70,100]} tick={{fontSize:9}} tickFormatter={v => `${v}%`}/>
+                <YAxis type="category" dataKey="category" tick={{fontSize:9,fill:'var(--text-2)'}} width={95}/>
+                <Tooltip formatter={v => `${v}%`}/>
+                <Bar dataKey="accuracy" radius={[0,3,3,0]}>
+                  {(data.categoryAccuracy||[]).map((e,i) => (
+                    <Cell key={i} fill={e.accuracy >= 88 ? '#16A34A' : e.accuracy >= 80 ? '#D97706' : '#EA580C'}/>
+                  ))}
+                </Bar>
+              </BarChart>
+            ) : (
+              <BarChart data={(branchFilter.length ? (data.branchAccuracy||[]).filter(b => branchFilter.includes(b.branch)) : data.branchAccuracy||[])} layout="vertical" margin={{top:5,right:30,left:60,bottom:5}}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false}/>
+                <XAxis type="number" domain={[70,100]} tick={{fontSize:9}} tickFormatter={v => `${v}%`}/>
+                <YAxis type="category" dataKey="branch" tick={{fontSize:10,fill:'var(--text-2)'}} width={55}/>
+                <Tooltip formatter={v => `${v}%`}/>
+                <Bar dataKey="accuracy" radius={[0,3,3,0]}>
+                  {(data.branchAccuracy||[]).map((e,i) => (
+                    <Cell key={i} fill={e.accuracy >= 85 ? '#16A34A' : e.accuracy >= 80 ? '#D97706' : '#EA580C'}/>
+                  ))}
+                </Bar>
+              </BarChart>
+            )}
           </ResponsiveContainer>
         </div>
 

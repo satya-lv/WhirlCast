@@ -7,7 +7,17 @@ const CATEGORIES = ['Direct Cool Refrigerator','Frost Free Refrigerator','Washin
 const BRANCHES   = ['Mumbai','New Delhi','Kolkata','Chennai','Bangalore','Hyderabad','Pune','Ahmedabad'];
 const MONTHS     = ['Jun','Jul','Aug','Sep','Oct','Nov'];
 
-const FALLBACK_SKUS = ['REF_190L_DirectCool','REF_240L_FrostFree','REF_340L_TripleDoor','WM_7KG_TopLoad','WM_8KG_FrontLoad','WM_6.5KG_SemiAuto','AC_1.5T_Inverter','AC_2.0T_Split','MW_25L_Convection','IH_3B_SmartGlass'];
+const CAT_MAP_NPI = {
+  'REF_190L_DirectCool':'Direct Cool Refrigerator','REF_240L_FrostFree':'Frost Free Refrigerator',
+  'REF_340L_TripleDoor':'Frost Free Refrigerator', 'WM_7KG_TopLoad':'Washing Machine',
+  'WM_8KG_FrontLoad':'Washing Machine',            'WM_6.5KG_SemiAuto':'Washing Machine',
+  'AC_1.5T_Inverter':'Air Conditioner',            'AC_2.0T_Split':'Air Conditioner',
+  'MW_25L_Convection':'Microwave',                 'IH_3B_SmartGlass':'Induction',
+};
+const SEED_BASE_NPI = {
+  'Direct Cool Refrigerator':1800,'Frost Free Refrigerator':2060,'Washing Machine':3620,
+  'Air Conditioner':4905,'Microwave':558,'Induction':430,
+};
 
 const RESULTS = {
   recommended: {
@@ -62,17 +72,13 @@ export default function NPIForecasting() {
   const [chartLines, setChartLines]     = useState([...LOOKALIKE_LINES]);
 
   /* ── Renovation-specific state ── */
-  const [renovForm, setRenovForm] = useState({ predecessorSku: '', predecessorInventory: '', sellThroughRate: '30', transitionStart: '' });
-  const [activeSkus, setActiveSkus]     = useState(FALLBACK_SKUS);
-  const [lflSaved, setLflSaved]         = useState(false);
+  const [lflMappings, setLflMappings] = useState([]);
+  const [selectedLfl, setSelectedLfl] = useState(''); // index into lflMappings as string
 
   useEffect(() => {
-    fetch('/api/admin/products')
+    fetch('/api/admin/lfl')
       .then(r => r.json())
-      .then(d => {
-        const skus = (d.products || []).filter(p => p.active !== 0).map(p => p.sku);
-        if (skus.length) setActiveSkus(skus);
-      })
+      .then(d => setLflMappings(d.mappings || []))
       .catch(() => {});
   }, []);
 
@@ -81,16 +87,21 @@ export default function NPIForecasting() {
     setNpiType(type);
     setResults(null);
     setSubmitAttempted(false);
-    setLflSaved(false);
+    setSelectedLfl('');
   };
+
+  /* ── Derived LFL ── */
+  const selectedLflEntry = selectedLfl !== '' ? lflMappings[parseInt(selectedLfl)] || null : null;
+  const filteredLflCount = lflMappings.filter(l => !form.sku || l.new_sku === form.sku).length;
 
   /* ── Generate ── */
   const handleGenerate = async () => {
     setSubmitAttempted(true);
     const missing = REQUIRED_FIELDS.filter(f => !form[f]);
     if (missing.length) { toast('Please fill in all required fields', 'warning'); return; }
-    if (npiType === 'renovation' && (!renovForm.predecessorSku || !renovForm.predecessorInventory || !renovForm.transitionStart)) {
-      toast('Please fill in all renovation details', 'warning'); return;
+    if (npiType === 'renovation') {
+      if (filteredLflCount === 0) { toast('No LFL mappings available. Contact your admin.', 'warning'); return; }
+      if (!selectedLfl) { toast('Please select an LFL predecessor mapping', 'warning'); return; }
     }
     setLoading(true);
     await new Promise(r => setTimeout(r, 2000));
@@ -104,13 +115,14 @@ export default function NPIForecasting() {
     toast(`✅ Look-alike Blend forecast saved for ${form.sku} — added to Jun 2026 cycle`, 'success');
   };
 
-  /* ── Renovation: phase-out computation ── */
+  /* ── Renovation: phase-out computed from backend defaults (user does not input these) ── */
   const computePhaseOut = () => {
     if (!results || npiType !== 'renovation') return [];
-    const inv = Math.max(0, parseInt(renovForm.predecessorInventory) || 0);
-    const str = Math.max(0, Math.min(1, (parseFloat(renovForm.sellThroughRate) || 30) / 100));
-    let opening = inv;
-    return MONTHS.map((month) => {
+    const cat = selectedLflEntry ? CAT_MAP_NPI[selectedLflEntry.old_sku] : null;
+    const monthlyAvg = Math.round((cat ? SEED_BASE_NPI[cat] : 1000) / 6);
+    let opening = Math.round(monthlyAvg * 3 * 2.5); // 3-month avg demand × 2.5 buffer
+    const str = 0.65; // default 65% sell-through
+    return MONTHS.map(month => {
       const sold    = Math.round(opening * str);
       const closing = Math.max(0, opening - sold);
       const status  = opening === 0 ? 'Phase-out Complete' : closing === 0 ? 'Transition Complete' : 'Active';
@@ -120,11 +132,19 @@ export default function NPIForecasting() {
     });
   };
 
-  /* ── Renovation: transition month index (0=Jun … 5=Nov) ── */
+  /* ── Renovation: transition = launch date + 30 days ── */
   const getTransIdx = () => {
-    if (!renovForm.transitionStart) return 0;
-    const d = new Date(renovForm.transitionStart);
-    return Math.max(0, Math.min(5, d.getMonth() - 5)); // Jun=5 → idx 0
+    if (!form.launch) return 0;
+    const d = new Date(form.launch);
+    d.setDate(d.getDate() + 30);
+    return Math.max(0, Math.min(5, d.getMonth() - 5));
+  };
+
+  const getTransitionDate = () => {
+    if (!form.launch) return null;
+    const d = new Date(form.launch);
+    d.setDate(d.getDate() + 30);
+    return d;
   };
 
   /* ── Renovation: blended total ── */
@@ -143,27 +163,6 @@ export default function NPIForecasting() {
       }
       return { month, oldSku, newSku, total: oldSku + newSku };
     });
-  };
-
-  /* ── LFL mapping save ── */
-  const handleLflSave = async () => {
-    try {
-      await fetch('/api/admin/lfl/add', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          old_sku: renovForm.predecessorSku,
-          new_sku: form.sku,
-          effective_date: renovForm.transitionStart || new Date().toISOString().slice(0, 10),
-          reason: 'Product renovation — NPI transition',
-          added_by: 'Demand Planner',
-        }),
-      });
-      setLflSaved(true);
-      toast('✅ LFL mapping saved — future forecasts will use new SKU history', 'success');
-    } catch {
-      toast('Failed to save LFL mapping', 'error');
-    }
   };
 
   /* ── Chart data ── */
@@ -186,7 +185,6 @@ export default function NPIForecasting() {
           What type of product introduction is this?
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, maxWidth: 760 }}>
-          {/* Card 1: New Product Innovation */}
           <div
             onClick={() => handleTypeSelect('new_product')}
             style={{
@@ -206,7 +204,6 @@ export default function NPIForecasting() {
             )}
           </div>
 
-          {/* Card 2: Product Renovation */}
           <div
             onClick={() => handleTypeSelect('renovation')}
             style={{
@@ -228,7 +225,7 @@ export default function NPIForecasting() {
         </div>
       </div>
 
-      {/* ── Step 1: Product Details (shown after type is chosen) ── */}
+      {/* ── Step 1: Register New Product ── */}
       {npiType && (
         <div style={{ background: 'var(--card)', borderRadius: 16, padding: 24, boxShadow: 'var(--shadow-sm)', marginBottom: 16, border: '0.5px solid var(--border)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
@@ -241,12 +238,12 @@ export default function NPIForecasting() {
             </div>
           </div>
 
-          {/* Common fields */}
+          {/* Row 1: SKU, Segment, Price */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 16, marginBottom: 16 }}>
             {[
-              { key: 'sku',     label: 'New SKU Code',     placeholder: 'e.g. REF_225L_DC_2026', required: true },
-              { key: 'segment', label: 'Segment / Size',   placeholder: 'e.g. 225L',             required: false },
-              { key: 'price',   label: 'Price Point (₹)',  placeholder: 'e.g. 14500',            required: true },
+              { key: 'sku',     label: 'New SKU Code',    placeholder: 'e.g. REF_225L_DC_2026', required: true },
+              { key: 'segment', label: 'Segment / Size',  placeholder: 'e.g. 225L',             required: false },
+              { key: 'price',   label: 'Price Point (₹)', placeholder: 'e.g. 14500',            required: true },
             ].map(f => (
               <div key={f.key}>
                 <label style={labelStyle}>{f.label}{f.required && <span style={{ color:'#DC2626', marginLeft:2 }}>*</span>}</label>
@@ -258,11 +255,11 @@ export default function NPIForecasting() {
             ))}
           </div>
 
+          {/* Row 2: Category, Launch Date, Target Branches */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 16, marginBottom: 20 }}>
             <div>
               <label style={labelStyle}>Category<span style={{ color:'#DC2626', marginLeft:2 }}>*</span></label>
-              <select value={form.category} onChange={e => setForm(p => ({ ...p, category: e.target.value }))}
-                style={fieldStyle}>
+              <select value={form.category} onChange={e => setForm(p => ({ ...p, category: e.target.value }))} style={fieldStyle}>
                 {CATEGORIES.map(c => <option key={c}>{c}</option>)}
               </select>
             </div>
@@ -278,42 +275,42 @@ export default function NPIForecasting() {
             </div>
           </div>
 
-          {/* ── Renovation-specific additional fields ── */}
+          {/* ── Renovation: LFL Predecessor Mapping ── */}
           {npiType === 'renovation' && (
             <div style={{ background: '#FFFBEB', borderRadius: 12, padding: 20, border: '1px solid #FCD34D', marginBottom: 20 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: '#92400E', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-                🔄 Renovation Details
-                <span style={{ fontSize: 11, fontWeight: 400, color: '#D97706' }}>— predecessor phase-out planning</span>
+                🔄 LFL Predecessor Mapping
+                <span style={{ fontSize: 11, fontWeight: 400, color: '#D97706' }}>— managed by your admin team</span>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                <div>
-                  <label style={{ ...labelStyle, color: '#92400E' }}>Predecessor SKU<span style={{ color:'#DC2626', marginLeft:2 }}>*</span></label>
-                  <select value={renovForm.predecessorSku} onChange={e => setRenovForm(p => ({ ...p, predecessorSku: e.target.value }))}
-                    style={{ ...fieldStyle, background: '#FFFEF5', borderColor: submitAttempted && !renovForm.predecessorSku ? '#DC2626' : '#FCD34D' }}>
-                    <option value="">Select predecessor SKU…</option>
-                    {activeSkus.map(s => <option key={s} value={s}>{s}</option>)}
+              <div>
+                <label style={{ ...labelStyle, color: '#92400E' }}>
+                  LFL Predecessor Mapping<span style={{ color:'#DC2626', marginLeft:2 }}>*</span>
+                </label>
+                {filteredLflCount === 0 ? (
+                  <div style={{ ...fieldStyle, background: '#F3F4F6', color: '#9CA3AF', border: '1px solid #E5E7EB', cursor: 'not-allowed' }}>
+                    No LFL mappings found. Ask your admin to add a mapping in the Admin Console.
+                  </div>
+                ) : (
+                  <select
+                    value={selectedLfl}
+                    onChange={e => setSelectedLfl(e.target.value)}
+                    style={{ ...fieldStyle, background: '#FFFEF5', borderColor: submitAttempted && !selectedLfl ? '#DC2626' : '#FCD34D' }}>
+                    <option value="">Select LFL mapping…</option>
+                    {lflMappings.map((l, i) => {
+                      if (form.sku && l.new_sku !== form.sku) return null;
+                      return (
+                        <option key={i} value={String(i)}>
+                          {l.old_sku} → {l.new_sku} (effective: {l.effective_date})
+                        </option>
+                      );
+                    })}
                   </select>
-                  {submitAttempted && !renovForm.predecessorSku && <span style={{ color:'#DC2626', fontSize:10, marginTop:3, display:'block' }}>Required</span>}
-                </div>
-                <div>
-                  <label style={{ ...labelStyle, color: '#92400E' }}>Current Predecessor Inventory (units)<span style={{ color:'#DC2626', marginLeft:2 }}>*</span></label>
-                  <input type="number" min="0" value={renovForm.predecessorInventory} onChange={e => setRenovForm(p => ({ ...p, predecessorInventory: e.target.value }))}
-                    placeholder="e.g. 5000"
-                    style={{ ...fieldStyle, background: '#FFFEF5', borderColor: submitAttempted && !renovForm.predecessorInventory ? '#DC2626' : '#FCD34D' }}/>
-                  {submitAttempted && !renovForm.predecessorInventory && <span style={{ color:'#DC2626', fontSize:10, marginTop:3, display:'block' }}>Required</span>}
-                </div>
-                <div>
-                  <label style={{ ...labelStyle, color: '#92400E' }}>Monthly Sell-through Rate %</label>
-                  <input type="number" min="1" max="100" value={renovForm.sellThroughRate} onChange={e => setRenovForm(p => ({ ...p, sellThroughRate: e.target.value }))}
-                    placeholder="e.g. 30"
-                    style={{ ...fieldStyle, background: '#FFFEF5', borderColor: '#FCD34D' }}/>
-                  <div style={{ fontSize: 10, color: '#D97706', marginTop: 3 }}>How fast existing inventory depletes each month</div>
-                </div>
-                <div>
-                  <label style={{ ...labelStyle, color: '#92400E' }}>Expected Transition Start Date<span style={{ color:'#DC2626', marginLeft:2 }}>*</span></label>
-                  <input type="date" value={renovForm.transitionStart} onChange={e => setRenovForm(p => ({ ...p, transitionStart: e.target.value }))}
-                    style={{ ...fieldStyle, background: '#FFFEF5', borderColor: submitAttempted && !renovForm.transitionStart ? '#DC2626' : '#FCD34D' }}/>
-                  {submitAttempted && !renovForm.transitionStart && <span style={{ color:'#DC2626', fontSize:10, marginTop:3, display:'block' }}>Required</span>}
+                )}
+                {submitAttempted && !selectedLfl && filteredLflCount > 0 && (
+                  <span style={{ color:'#DC2626', fontSize:10, marginTop:3, display:'block' }}>Required</span>
+                )}
+                <div style={{ fontSize: 10, color: '#D97706', marginTop: 6 }}>
+                  Select from LFL master — managed by your admin team.
                 </div>
               </div>
             </div>
@@ -342,7 +339,6 @@ export default function NPIForecasting() {
             The <strong>Recommended</strong> view uses a weighted blend of all 3. Select the view that best fits your planning assumptions.
           </p>
 
-          {/* 3 Result Cards */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14, marginBottom: 24 }}>
             {Object.entries(results).map(([key, r]) => (
               <div key={key} onClick={() => setSelected(key)}
@@ -386,13 +382,6 @@ export default function NPIForecasting() {
                 </label>
               ))}
             </div>
-            <div style={{ display:'flex', flexWrap:'wrap', gap:5, marginBottom:8 }}>
-              {chartLines.map(line => (
-                <span key={line} style={{ background:`${LINE_COLORS_NPI[line]}18`, color:LINE_COLORS_NPI[line], border:`1px solid ${LINE_COLORS_NPI[line]}40`, borderRadius:12, padding:'2px 8px', fontSize:10, fontWeight:600, display:'flex', alignItems:'center', gap:4 }}>
-                  {line} <button onClick={() => setChartLines(v => v.filter(l=>l!==line))} style={{ background:'none', border:'none', cursor:'pointer', padding:0, lineHeight:1, fontSize:13, color:LINE_COLORS_NPI[line] }}>×</button>
-                </span>
-              ))}
-            </div>
             <div style={{ height: 200 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart data={chartData}>
@@ -419,176 +408,143 @@ export default function NPIForecasting() {
       )}
 
       {/* ══════════════════════════════════ RENOVATION OUTPUT ══════════════════════════════════ */}
-      {results && npiType === 'renovation' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, animation: 'fadeUp 0.4s ease' }}>
+      {results && npiType === 'renovation' && (() => {
+        const phaseOutRows = computePhaseOut();
+        const transDate    = getTransitionDate();
+        const oldSkuName   = selectedLflEntry?.old_sku || 'Old SKU';
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, animation: 'fadeUp 0.4s ease' }}>
 
-          {/* Section A: Predecessor Phase-Out Plan */}
-          <div style={{ background: 'var(--card)', borderRadius: 16, padding: 24, boxShadow: 'var(--shadow-sm)', border: '0.5px solid var(--border)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-              <div style={{ width: 28, height: 28, background: '#D97706', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: 'white', flexShrink: 0 }}>A</div>
-              <div>
-                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>Predecessor Phase-Out Plan</div>
-                <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 2 }}>
-                  {renovForm.predecessorSku || 'Predecessor SKU'} · Starting inventory: {parseInt(renovForm.predecessorInventory || 0).toLocaleString('en-IN')} units · Sell-through: {renovForm.sellThroughRate}%/month
-                </div>
-              </div>
-            </div>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                <thead>
-                  <tr>
-                    {['Month','Opening Inventory','Monthly Sell-through','Closing Inventory','Phase-out Status'].map(h => (
-                      <th key={h} style={thStyle}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {computePhaseOut().map((row, i) => (
-                    <tr key={row.month} style={{ background: i % 2 === 0 ? 'var(--card)' : '#FAFAFA' }}>
-                      <td style={{ ...tdStyle, fontWeight: 600 }}>{row.month} '26</td>
-                      <td style={tdStyle}>{row.opening.toLocaleString('en-IN')}</td>
-                      <td style={tdStyle}>{row.sold.toLocaleString('en-IN')}</td>
-                      <td style={{ ...tdStyle, fontWeight: 600, color: row.closing === 0 ? '#16A34A' : 'var(--text-1)' }}>{row.closing.toLocaleString('en-IN')}</td>
-                      <td style={tdStyle}>
-                        <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 10, background: row.status === 'Transition Complete' || row.status === 'Phase-out Complete' ? '#F0FDF4' : '#FFFBEB', color: row.status === 'Transition Complete' || row.status === 'Phase-out Complete' ? '#16A34A' : '#D97706' }}>
-                          {row.status === 'Transition Complete' ? '✅ Transition Complete' : row.status === 'Phase-out Complete' ? '✅ Phase-out Complete' : '🔄 Active'}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Section B: New SKU Ramp Forecast */}
-          <div style={{ background: 'var(--card)', borderRadius: 16, padding: 24, boxShadow: 'var(--shadow-sm)', border: '0.5px solid var(--border)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-              <div style={{ width: 28, height: 28, background: 'var(--navy-accent)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: 'white', flexShrink: 0 }}>B</div>
-              <div>
-                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>New SKU Ramp Forecast — {form.sku || 'New SKU'}</div>
-                <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 2 }}>
-                  Ramp starts {renovForm.transitionStart ? new Date(renovForm.transitionStart).toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' }) : '—'} · Month 1 = channel fill (50%) · Months 2–6 = normal look-alike ramp
-                </div>
-              </div>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14 }}>
-              {Object.entries(results).map(([key, r]) => {
-                const transIdx = getTransIdx();
-                const rampMonthly = MONTHS.map((_, i) => {
-                  if (i < transIdx) return 0;
-                  if (i === transIdx) return Math.round(r.monthly[0] * 0.5);
-                  const ri = i - transIdx;
-                  return r.monthly[Math.min(ri, r.monthly.length - 1)] || 0;
-                });
-                const rampTotal = rampMonthly.reduce((s, v) => s + v, 0);
-                const maxV = Math.max(...rampMonthly, 1);
-                return (
-                  <div key={key} onClick={() => setSelected(key)}
-                    style={{ borderRadius: 14, padding: 20, cursor: 'pointer', background: r.dark ? 'var(--navy)' : selected === key ? '#EFF6FF' : 'var(--bg)', border: selected === key ? `2px solid ${r.dark ? '#3B82F6' : r.tagColor}` : `0.5px solid ${r.dark ? 'rgba(255,255,255,0.08)' : 'var(--border)'}`, transition: 'all 0.2s', transform: selected === key ? 'translateY(-2px)' : 'none' }}>
-                    <span style={{ display: 'inline-block', fontSize: 10, fontWeight: 700, padding: '4px 10px', borderRadius: 20, marginBottom: 10, background: r.tagColor, color: 'white' }}>{r.tag}</span>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: r.dark ? 'white' : 'var(--text-1)', marginBottom: 4 }}>{r.method}</div>
-                    <div style={{ fontSize: 28, fontWeight: 800, color: r.dark ? 'white' : r.tagColor, marginBottom: 2 }}>{rampTotal.toLocaleString('en-IN')}</div>
-                    <div style={{ fontSize: 11, color: r.dark ? 'rgba(255,255,255,0.4)' : 'var(--text-2)', marginBottom: 14 }}>projected units · post-transition</div>
-                    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 36, marginBottom: 8 }}>
-                      {rampMonthly.map((v, i) => {
-                        const h = (v / maxV) * 100;
-                        const opacity = 0.35 + (i / rampMonthly.length) * 0.65;
-                        return <div key={i} style={{ flex: 1, borderRadius: '2px 2px 0 0', height: `${Math.max(h, v > 0 ? 5 : 0)}%`, background: r.dark ? `rgba(255,255,255,${opacity})` : r.tagColor, opacity: r.dark ? 1 : opacity }}/>;
-                      })}
-                    </div>
-                    <div style={{ fontSize: 9, color: r.dark ? 'rgba(255,255,255,0.35)' : 'var(--text-3)', lineHeight: 1.4 }}>
-                      {MONTHS.map((m, i) => `${m}: ${rampMonthly[i].toLocaleString('en-IN')}`).join(' · ')}
-                    </div>
+            {/* Section A: Predecessor Phase-Out Plan */}
+            <div style={{ background: 'var(--card)', borderRadius: 16, padding: 24, boxShadow: 'var(--shadow-sm)', border: '0.5px solid var(--border)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                <div style={{ width: 28, height: 28, background: '#D97706', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: 'white', flexShrink: 0 }}>A</div>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>Predecessor Phase-Out Plan</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 2 }}>
+                    {oldSkuName} · Starting inventory: {(phaseOutRows[0]?.opening || 0).toLocaleString('en-IN')} units · Sell-through: 65%/month
                   </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Section C: Blended Total Forecast */}
-          <div style={{ background: 'var(--card)', borderRadius: 16, padding: 24, boxShadow: 'var(--shadow-sm)', border: '0.5px solid var(--border)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-              <div style={{ width: 28, height: 28, background: '#16A34A', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: 'white', flexShrink: 0 }}>C</div>
-              <div>
-                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>Blended Total Forecast</div>
-                <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 2 }}>Actual plan submitted to supply — combined old and new SKU demand</div>
-              </div>
-            </div>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                <thead>
-                  <tr>
-                    {['Month', `${renovForm.predecessorSku || 'Old SKU'} Units`, `${form.sku || 'New SKU'} Units`, 'Combined Total'].map(h => (
-                      <th key={h} style={thStyle}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {computeRenovBlended().map((row, i) => (
-                    <tr key={row.month} style={{ background: i % 2 === 0 ? 'var(--card)' : '#FAFAFA' }}>
-                      <td style={{ ...tdStyle, fontWeight: 600 }}>{row.month} '26</td>
-                      <td style={{ ...tdStyle, color: row.oldSku === 0 ? '#9CA3AF' : '#D97706', fontWeight: row.oldSku > 0 ? 600 : 400 }}>{row.oldSku.toLocaleString('en-IN')}</td>
-                      <td style={{ ...tdStyle, color: row.newSku === 0 ? '#9CA3AF' : 'var(--navy-accent)', fontWeight: row.newSku > 0 ? 600 : 400 }}>{row.newSku.toLocaleString('en-IN')}</td>
-                      <td style={{ ...tdStyle, fontWeight: 700, background: '#EFF3FF', color: 'var(--navy-accent)' }}>{row.total.toLocaleString('en-IN')}</td>
-                    </tr>
-                  ))}
-                  <tr style={{ background: '#F0FDF4', fontWeight: 700 }}>
-                    <td style={{ ...tdStyle, fontWeight: 700 }}>6M Total</td>
-                    <td style={{ ...tdStyle, fontWeight: 700, color: '#D97706' }}>{computeRenovBlended().reduce((s, r) => s + r.oldSku, 0).toLocaleString('en-IN')}</td>
-                    <td style={{ ...tdStyle, fontWeight: 700, color: 'var(--navy-accent)' }}>{computeRenovBlended().reduce((s, r) => s + r.newSku, 0).toLocaleString('en-IN')}</td>
-                    <td style={{ ...tdStyle, fontWeight: 800, background: '#DCFCE7', color: '#16A34A' }}>{computeRenovBlended().reduce((s, r) => s + r.total, 0).toLocaleString('en-IN')}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <div style={{ marginTop: 16 }}>
-              <button onClick={handleSave} style={{ background: '#16A34A', color: 'white', border: 'none', borderRadius: 12, padding: '13px 28px', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
-                ✓ Use {Object.entries(results).find(([k]) => k === selected)?.[1]?.tag} as Forecast → Save to Cycle
-              </button>
-            </div>
-          </div>
-
-          {/* Section D: LFL Mapping Confirmation */}
-          <div style={{ background: 'var(--card)', borderRadius: 16, padding: 24, boxShadow: 'var(--shadow-sm)', border: '0.5px solid var(--border)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-              <div style={{ width: 28, height: 28, background: '#7C3AED', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: 'white', flexShrink: 0 }}>D</div>
-              <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>LFL Mapping Confirmation</div>
-            </div>
-
-            <div style={{ background: '#F5F3FF', borderRadius: 10, padding: 16, border: '1px solid #DDD6FE', marginBottom: 16 }}>
-              <div style={{ fontSize: 13, color: '#4C1D95', marginBottom: 12, lineHeight: 1.6 }}>
-                Map{' '}
-                <code style={{ background: '#EDE9FE', padding: '2px 6px', borderRadius: 4, fontFamily: 'monospace', fontSize: 12, color: '#6D28D9' }}>{renovForm.predecessorSku || '—'}</code>
-                {' '}→{' '}
-                <code style={{ background: '#EDE9FE', padding: '2px 6px', borderRadius: 4, fontFamily: 'monospace', fontSize: 12, color: '#6D28D9' }}>{form.sku || '—'}</code>
-                {' '}in LFL Master?
-              </div>
-              <div style={{ fontSize: 11, color: '#7C3AED', marginBottom: 14, lineHeight: 1.5 }}>
-                <strong>Effective date:</strong> {renovForm.transitionStart || '—'} &nbsp;·&nbsp;
-                <strong>Reason:</strong> Product renovation — NPI transition
-              </div>
-
-              {!lflSaved ? (
-                <button
-                  onClick={handleLflSave}
-                  disabled={!renovForm.predecessorSku || !form.sku}
-                  style={{ background: !renovForm.predecessorSku || !form.sku ? '#E5E7EB' : '#7C3AED', color: !renovForm.predecessorSku || !form.sku ? '#9CA3AF' : 'white', border: 'none', borderRadius: 10, padding: '10px 20px', fontSize: 13, fontWeight: 600, cursor: !renovForm.predecessorSku || !form.sku ? 'not-allowed' : 'pointer', fontFamily: 'Inter' }}>
-                  ✓ Yes, create mapping
-                </button>
-              ) : (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#16A34A', fontWeight: 600, fontSize: 13 }}>
-                  <span style={{ fontSize: 18 }}>✅</span> LFL mapping saved successfully
                 </div>
-              )}
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      {['Month','Opening Inventory','Monthly Sell-through','Closing Inventory','Phase-out Status'].map(h => (
+                        <th key={h} style={thStyle}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {phaseOutRows.map((row, i) => (
+                      <tr key={row.month} style={{ background: i % 2 === 0 ? 'var(--card)' : '#FAFAFA' }}>
+                        <td style={{ ...tdStyle, fontWeight: 600 }}>{row.month} '26</td>
+                        <td style={tdStyle}>{row.opening.toLocaleString('en-IN')}</td>
+                        <td style={tdStyle}>{row.sold.toLocaleString('en-IN')}</td>
+                        <td style={{ ...tdStyle, fontWeight: 600, color: row.closing === 0 ? '#16A34A' : 'var(--text-1)' }}>{row.closing.toLocaleString('en-IN')}</td>
+                        <td style={tdStyle}>
+                          <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 10, background: row.status === 'Transition Complete' || row.status === 'Phase-out Complete' ? '#F0FDF4' : '#FFFBEB', color: row.status === 'Transition Complete' || row.status === 'Phase-out Complete' ? '#16A34A' : '#D97706' }}>
+                            {row.status === 'Transition Complete' ? '✅ Transition Complete' : row.status === 'Phase-out Complete' ? '✅ Phase-out Complete' : '🔄 Active'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
 
-            <div style={{ background: '#EFF6FF', borderRadius: 10, padding: 14, border: '1px solid #BFDBFE', fontSize: 12, color: '#1D4ED8', lineHeight: 1.6 }}>
-              📌 Once the mapping is saved, future forecast cycles will use the new SKU's history as a continuation of the predecessor. Historical actuals from <strong>{renovForm.predecessorSku || 'the old SKU'}</strong> will flow through to <strong>{form.sku || 'the new SKU'}</strong> for trend analysis and model training.
+            {/* Section B: New SKU Ramp Forecast */}
+            <div style={{ background: 'var(--card)', borderRadius: 16, padding: 24, boxShadow: 'var(--shadow-sm)', border: '0.5px solid var(--border)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+                <div style={{ width: 28, height: 28, background: 'var(--navy-accent)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: 'white', flexShrink: 0 }}>B</div>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>New SKU Ramp Forecast — {form.sku || 'New SKU'}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 2 }}>
+                    Ramp starts {transDate ? transDate.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' }) : '—'} · Month 1 = channel fill (50%) · Months 2–6 = normal look-alike ramp
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14 }}>
+                {Object.entries(results).map(([key, r]) => {
+                  const transIdx = getTransIdx();
+                  const rampMonthly = MONTHS.map((_, i) => {
+                    if (i < transIdx) return 0;
+                    if (i === transIdx) return Math.round(r.monthly[0] * 0.5);
+                    const ri = i - transIdx;
+                    return r.monthly[Math.min(ri, r.monthly.length - 1)] || 0;
+                  });
+                  const rampTotal = rampMonthly.reduce((s, v) => s + v, 0);
+                  const maxV = Math.max(...rampMonthly, 1);
+                  return (
+                    <div key={key} onClick={() => setSelected(key)}
+                      style={{ borderRadius: 14, padding: 20, cursor: 'pointer', background: r.dark ? 'var(--navy)' : selected === key ? '#EFF6FF' : 'var(--bg)', border: selected === key ? `2px solid ${r.dark ? '#3B82F6' : r.tagColor}` : `0.5px solid ${r.dark ? 'rgba(255,255,255,0.08)' : 'var(--border)'}`, transition: 'all 0.2s', transform: selected === key ? 'translateY(-2px)' : 'none' }}>
+                      <span style={{ display: 'inline-block', fontSize: 10, fontWeight: 700, padding: '4px 10px', borderRadius: 20, marginBottom: 10, background: r.tagColor, color: 'white' }}>{r.tag}</span>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: r.dark ? 'white' : 'var(--text-1)', marginBottom: 4 }}>{r.method}</div>
+                      <div style={{ fontSize: 28, fontWeight: 800, color: r.dark ? 'white' : r.tagColor, marginBottom: 2 }}>{rampTotal.toLocaleString('en-IN')}</div>
+                      <div style={{ fontSize: 11, color: r.dark ? 'rgba(255,255,255,0.4)' : 'var(--text-2)', marginBottom: 14 }}>projected units · post-transition</div>
+                      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 36, marginBottom: 8 }}>
+                        {rampMonthly.map((v, i) => {
+                          const h = (v / maxV) * 100;
+                          const opacity = 0.35 + (i / rampMonthly.length) * 0.65;
+                          return <div key={i} style={{ flex: 1, borderRadius: '2px 2px 0 0', height: `${Math.max(h, v > 0 ? 5 : 0)}%`, background: r.dark ? `rgba(255,255,255,${opacity})` : r.tagColor, opacity: r.dark ? 1 : opacity }}/>;
+                        })}
+                      </div>
+                      <div style={{ fontSize: 9, color: r.dark ? 'rgba(255,255,255,0.35)' : 'var(--text-3)', lineHeight: 1.4 }}>
+                        {MONTHS.map((m, i) => `${m}: ${rampMonthly[i].toLocaleString('en-IN')}`).join(' · ')}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
+
+            {/* Section C: Blended Total Forecast */}
+            <div style={{ background: 'var(--card)', borderRadius: 16, padding: 24, boxShadow: 'var(--shadow-sm)', border: '0.5px solid var(--border)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                <div style={{ width: 28, height: 28, background: '#16A34A', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: 'white', flexShrink: 0 }}>C</div>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>Blended Total Forecast</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 2 }}>Actual plan submitted to supply — combined old and new SKU demand</div>
+                </div>
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      {['Month', `${oldSkuName} Units`, `${form.sku || 'New SKU'} Units`, 'Combined Total'].map(h => (
+                        <th key={h} style={thStyle}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {computeRenovBlended().map((row, i) => (
+                      <tr key={row.month} style={{ background: i % 2 === 0 ? 'var(--card)' : '#FAFAFA' }}>
+                        <td style={{ ...tdStyle, fontWeight: 600 }}>{row.month} '26</td>
+                        <td style={{ ...tdStyle, color: row.oldSku === 0 ? '#9CA3AF' : '#D97706', fontWeight: row.oldSku > 0 ? 600 : 400 }}>{row.oldSku.toLocaleString('en-IN')}</td>
+                        <td style={{ ...tdStyle, color: row.newSku === 0 ? '#9CA3AF' : 'var(--navy-accent)', fontWeight: row.newSku > 0 ? 600 : 400 }}>{row.newSku.toLocaleString('en-IN')}</td>
+                        <td style={{ ...tdStyle, fontWeight: 700, background: '#EFF3FF', color: 'var(--navy-accent)' }}>{row.total.toLocaleString('en-IN')}</td>
+                      </tr>
+                    ))}
+                    <tr style={{ background: '#F0FDF4', fontWeight: 700 }}>
+                      <td style={{ ...tdStyle, fontWeight: 700 }}>6M Total</td>
+                      <td style={{ ...tdStyle, fontWeight: 700, color: '#D97706' }}>{computeRenovBlended().reduce((s, r) => s + r.oldSku, 0).toLocaleString('en-IN')}</td>
+                      <td style={{ ...tdStyle, fontWeight: 700, color: 'var(--navy-accent)' }}>{computeRenovBlended().reduce((s, r) => s + r.newSku, 0).toLocaleString('en-IN')}</td>
+                      <td style={{ ...tdStyle, fontWeight: 800, background: '#DCFCE7', color: '#16A34A' }}>{computeRenovBlended().reduce((s, r) => s + r.total, 0).toLocaleString('en-IN')}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ marginTop: 16 }}>
+                <button onClick={handleSave} style={{ background: '#16A34A', color: 'white', border: 'none', borderRadius: 12, padding: '13px 28px', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
+                  ✓ Use {Object.entries(results).find(([k]) => k === selected)?.[1]?.tag} as Forecast → Save to Cycle
+                </button>
+              </div>
+            </div>
+
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

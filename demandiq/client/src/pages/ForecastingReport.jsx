@@ -31,6 +31,18 @@ const CAT_MAP = {
   'AC_1.5T_Inverter':'Air Conditioner',             'AC_2.0T_Split':'Air Conditioner',
   'MW_25L_Convection':'Microwave',                  'IH_3B_SmartGlass':'Induction',
 };
+const SKU_META = {
+  'REF_190L_DirectCool': { segment:'180-200L',  subsegment:'Single Door' },
+  'REF_240L_FrostFree':  { segment:'240L',       subsegment:'Double Door' },
+  'REF_340L_TripleDoor': { segment:'340L',       subsegment:'Triple Door' },
+  'WM_7KG_TopLoad':      { segment:'7KG',        subsegment:'Top Load' },
+  'WM_8KG_FrontLoad':    { segment:'8KG',        subsegment:'Front Load' },
+  'WM_6.5KG_SemiAuto':   { segment:'6.5KG',      subsegment:'Semi-Automatic' },
+  'AC_1.5T_Inverter':    { segment:'1.5 Ton',    subsegment:'Inverter Split' },
+  'AC_2.0T_Split':       { segment:'2.0 Ton',    subsegment:'Split' },
+  'MW_25L_Convection':   { segment:'25L',        subsegment:'Convection' },
+  'IH_3B_SmartGlass':    { segment:'3 Burner',   subsegment:'Smart Glass' },
+};
 
 const BRANCH_ACC = {
   'Mumbai':    { acc:91.0, bias:2.3 }, 'New Delhi': { acc:85.1, bias:6.9 },
@@ -194,7 +206,7 @@ export default function ForecastingReport() {
   const bskuMap = {};
   ffData.forEach(r => {
     const key = `${r.branch}|${r.sku}`;
-    if (!bskuMap[key]) bskuMap[key] = { branch:r.branch, sku:r.sku, cat:r.category||CAT_MAP[r.sku]||'', segment:r.segment||'', subsegment:r.subsegment||'', months:{} };
+    if (!bskuMap[key]) bskuMap[key] = { branch:r.branch, sku:r.sku, cat:r.category||CAT_MAP[r.sku]||'', segment:r.segment||SKU_META[r.sku]?.segment||'', subsegment:r.subsegment||SKU_META[r.sku]?.subsegment||'', months:{} };
     bskuMap[key].months[r.month] = r.value;
   });
   const allBskuRows = Object.values(bskuMap);
