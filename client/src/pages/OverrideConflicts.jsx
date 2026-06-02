@@ -41,16 +41,6 @@ const CAT_MAP = {
   'MW_25L_Convection':'Microwave',                  'IH_3B_SmartGlass':'Induction',
 };
 
-const BRANCH_STATS = {
-  'Mumbai':    { acc:'91.0', bias:'2.3' }, 'New Delhi':   { acc:'85.1', bias:'6.9' },
-  'Kolkata':   { acc:'81.0', bias:'8.2' }, 'Chennai':     { acc:'79.4', bias:'9.1' },
-  'Bangalore': { acc:'89.2', bias:'3.4' }, 'Hyderabad':   { acc:'83.5', bias:'5.8' },
-  'Pune':      { acc:'88.0', bias:'3.8' }, 'Ahmedabad':   { acc:'86.2', bias:'4.5' },
-};
-
-const SEED_CAT_BASE = { 'Direct Cool Refrigerator':1800,'Frost Free Refrigerator':2060,'Washing Machine':3620,'Air Conditioner':4905,'Microwave':558,'Induction':430 };
-const BRANCH_FACTORS_OC = { 'Mumbai':1.25,'New Delhi':1.22,'Kolkata':0.95,'Chennai':1.05,'Bangalore':1.08,'Hyderabad':0.98,'Pune':0.88,'Ahmedabad':0.85 };
-const seedAI = (cat, branch) => Math.round((SEED_CAT_BASE[cat]||1000) * (BRANCH_FACTORS_OC[branch]||1.0));
 
 const SKU_META = {
   'REF_190L_DirectCool': { segment:'180-200L',  subsegment:'Single Door' },
@@ -410,7 +400,6 @@ export default function OverrideConflicts() {
 
   /* ── Conflict Resolution tab data ── */
   const overrides      = data?.overrides     || [];
-  const categoryRollup = data?.categoryRollup || [];
   const allResolved    = !signedOff && overrides.length > 0 && overrides.every(o => o.final_override != null || o.status === 'resolved');
   const filteredOverrides = filterBranch ? overrides.filter(o => o.branch === filterBranch) : overrides;
 
