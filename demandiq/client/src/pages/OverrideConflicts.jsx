@@ -170,7 +170,8 @@ export default function OverrideConflicts() {
     const aiM = {}, catBSK = {}, ovM = {}, ovMe = {};
 
     for (const r of reportData?.by_branch_sku || []) {
-      const { branch, sku, category: cat, month, value } = r;
+      const { branch, sku, month, value } = r;
+      const cat = r.category || CAT_MAP[sku];
       if (!aiM[branch]) aiM[branch] = {};
       if (!aiM[branch][sku]) aiM[branch][sku] = {};
       aiM[branch][sku][month] = value;
