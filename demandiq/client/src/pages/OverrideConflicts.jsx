@@ -414,51 +414,6 @@ export default function OverrideConflicts() {
   const allResolved    = !signedOff && overrides.length > 0 && overrides.every(o => o.final_override != null || o.status === 'resolved');
   const filteredOverrides = filterBranch ? overrides.filter(o => o.branch === filterBranch) : overrides;
 
-  const catRows = (() => {
-    const cats = categoryRollup.length
-      ? categoryRollup.map(r => r.category)
-      : [...new Set((reportData?.by_category||[]).map(r => r.category))];
-    return cats.map(cat => {
-      const cr = categoryRollup.find(r => r.category === cat);
-      const catOvs = overrides.filter(o => CAT_MAP[o.sku] === cat);
-      const branchDev = {};
-      catOvs.forEach(o => { branchDev[o.branch] = (branchDev[o.branch]||0) + Math.abs(o.deviation||0); });
-      const topBranches = Object.entries(branchDev).sort((a,b) => b[1]-a[1]).slice(0,2).map(([b]) => b);
-      return { cat, aiTotal:cr?.ai_total||0, overrideTotal:cr?.override_total||0, deviation:cr?.deviation||0, status:cr?.status||'ok', topBranches };
-    });
-  })();
-
-  const getBranchOverrideRows = (cat) => {
-    const catOvs = overrides.filter(o => CAT_MAP[o.sku] === cat);
-    return BRANCHES.map(branch => {
-      const bOvs = catOvs.filter(o => o.branch === branch);
-      const reportAI = (reportData?.by_branch_sku||[]).filter(r => r.branch === branch && CAT_MAP[r.sku] === cat).reduce((s,r) => s + (r.value||0), 0);
-      const aiTotal = reportAI || bOvs.reduce((s,o) => s + (o.ai_forecast||0), 0) || seedAI(cat, branch);
-      const overriddenAI  = bOvs.reduce((s,o) => s + (o.ai_forecast||0), 0);
-      const overriddenVal = bOvs.reduce((s,o) => s + (o.override_value||0), 0);
-      const overrideTotal = bOvs.length > 0 ? (aiTotal - overriddenAI + overriddenVal) : aiTotal;
-      const deviation = aiTotal > 0 ? ((overrideTotal - aiTotal) / aiTotal * 100) : 0;
-      const skuDev = {};
-      bOvs.forEach(o => { skuDev[o.sku] = (skuDev[o.sku]||0) + Math.abs(o.deviation||0); });
-      const topSkus = Object.entries(skuDev).sort((a,b) => b[1]-a[1]).slice(0,2).map(([s]) => s);
-      const stats = BRANCH_STATS[branch] || { acc:'85.0', bias:'5.0' };
-      return { branch, aiTotal, overrideTotal, deviation, acc:stats.acc, bias:stats.bias, topSkus };
-    }).sort((a,b) => Math.abs(b.deviation) - Math.abs(a.deviation));
-  };
-
-  const getSkuOverrideRows = (cat, branch) => {
-    const skuOvs = overrides.filter(o => CAT_MAP[o.sku] === cat && o.branch === branch);
-    const skus = [...new Set(skuOvs.map(o => o.sku))];
-    return skus.map(sku => {
-      const sOvs = skuOvs.filter(o => o.sku === sku);
-      const aiTotal = sOvs.reduce((s,o) => s + (o.ai_forecast||0), 0);
-      const ovTotal = sOvs.reduce((s,o) => s + (o.override_value||0), 0);
-      const deviation = aiTotal > 0 ? ((ovTotal - aiTotal) / aiTotal * 100) : 0;
-      const last = sOvs[sOvs.length - 1];
-      return { sku, aiTotal, overrideVal:ovTotal, deviation, overrideBy:last?.override_by, reason:last?.reason, status:last?.status };
-    });
-  };
-
   /* ── Grid column template ── */
   const GRID_TPL = '190px repeat(6, 72px) 92px 92px 65px 90px';
 
@@ -982,4 +937,3 @@ export default function OverrideConflicts() {
   );
 }
 
-const thS = { padding:'10px 12px', textAlign:'right', fontSize:10, fontWeight:600, color:'#6B7280', textTransform:'uppercase', letterSpacing:'0.04em', borderBottom:'1px solid #E5E7EB', whiteSpace:'nowrap' };
