@@ -92,16 +92,16 @@ export default function NPIForecasting() {
 
   /* ── Derived LFL ── */
   const selectedLflEntry = selectedLfl !== '' ? lflMappings[parseInt(selectedLfl)] || null : null;
-  const filteredLflCount = lflMappings.filter(l => !form.sku || l.new_sku === form.sku).length;
 
   /* ── Generate ── */
   const handleGenerate = async () => {
     setSubmitAttempted(true);
-    const missing = REQUIRED_FIELDS.filter(f => !form[f]);
-    if (missing.length) { toast('Please fill in all required fields', 'warning'); return; }
     if (npiType === 'renovation') {
-      if (filteredLflCount === 0) { toast('No LFL mappings available. Contact your admin.', 'warning'); return; }
-      if (!selectedLfl) { toast('Please select an LFL predecessor mapping', 'warning'); return; }
+      if (lflMappings.length === 0) { toast('No LFL predecessors available. Contact your admin.', 'warning'); return; }
+      if (!selectedLfl) { toast('Please select an LFL predecessor', 'warning'); return; }
+    } else {
+      const missing = REQUIRED_FIELDS.filter(f => !form[f]);
+      if (missing.length) { toast('Please fill in all required fields', 'warning'); return; }
     }
     setLoading(true);
     await new Promise(r => setTimeout(r, 2000));
@@ -132,17 +132,19 @@ export default function NPIForecasting() {
     });
   };
 
-  /* ── Renovation: transition = launch date + 30 days ── */
+  /* ── Renovation: transition = LFL effective date + 30 days ── */
   const getTransIdx = () => {
-    if (!form.launch) return 0;
-    const d = new Date(form.launch);
+    const base = selectedLflEntry?.effective_date || form.launch;
+    if (!base) return 0;
+    const d = new Date(base);
     d.setDate(d.getDate() + 30);
     return Math.max(0, Math.min(5, d.getMonth() - 5));
   };
 
   const getTransitionDate = () => {
-    if (!form.launch) return null;
-    const d = new Date(form.launch);
+    const base = selectedLflEntry?.effective_date || form.launch;
+    if (!base) return null;
+    const d = new Date(base);
     d.setDate(d.getDate() + 30);
     return d;
   };
@@ -225,20 +227,65 @@ export default function NPIForecasting() {
         </div>
       </div>
 
-      {/* ── Step 1: Register New Product ── */}
-      {npiType && (
+      {/* ── Renovation: just the LFL predecessor selector ── */}
+      {npiType === 'renovation' && (
         <div style={{ background: 'var(--card)', borderRadius: 16, padding: 24, boxShadow: 'var(--shadow-sm)', marginBottom: 16, border: '0.5px solid var(--border)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-            <div style={{ width: 28, height: 28, background: 'var(--navy-accent)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: 'white', flexShrink: 0 }}>1</div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>
-              Register New Product
-              <span style={{ marginLeft: 10, fontSize: 11, fontWeight: 400, color: 'var(--text-3)' }}>
-                {npiType === 'renovation' ? '🔄 Renovation path' : '✨ New product path'}
-              </span>
+            <div style={{ width: 28, height: 28, background: '#D97706', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: 'white', flexShrink: 0 }}>1</div>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>Select LFL Predecessor</div>
+              <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 2 }}>
+                AI will use predecessor forecast history to plan the phase-out and ramp the new SKU.
+              </div>
             </div>
           </div>
 
-          {/* Row 1: SKU, Segment, Price */}
+          {lflMappings.length === 0 ? (
+            <div style={{ ...fieldStyle, background: '#F3F4F6', color: '#9CA3AF', border: '1px solid #E5E7EB', cursor: 'not-allowed', marginBottom: 20 }}>
+              No LFL predecessors found. Ask your admin to add one in the Admin Console.
+            </div>
+          ) : (
+            <div style={{ marginBottom: 20 }}>
+              <label style={labelStyle}>LFL Predecessor<span style={{ color:'#DC2626', marginLeft:2 }}>*</span></label>
+              <select
+                value={selectedLfl}
+                onChange={e => setSelectedLfl(e.target.value)}
+                style={{ ...fieldStyle, borderColor: submitAttempted && !selectedLfl ? '#DC2626' : 'var(--border)' }}>
+                <option value="">Select LFL predecessor…</option>
+                {lflMappings.map((l, i) => (
+                  <option key={i} value={String(i)}>
+                    {l.old_sku} → {l.new_sku} (effective: {l.effective_date})
+                  </option>
+                ))}
+              </select>
+              {submitAttempted && !selectedLfl && (
+                <span style={{ color:'#DC2626', fontSize:10, marginTop:3, display:'block' }}>Required</span>
+              )}
+              <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 6 }}>
+                Managed by your admin team in the Admin Console.
+              </div>
+            </div>
+          )}
+
+          <button onClick={handleGenerate} disabled={loading}
+            style={{ background: loading ? '#6B7280' : '#D97706', color: 'white', border: 'none', borderRadius: 12, padding: '13px 28px', fontSize: 14, fontWeight: 700, cursor: loading ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 10, transition: 'opacity 0.15s' }}>
+            {loading ? (
+              <><div style={{ width: 16, height: 16, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: 'white', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }}/> AI is analysing predecessor history...</>
+            ) : (
+              <> ⚡ Generate Forecast </>
+            )}
+          </button>
+        </div>
+      )}
+
+      {/* ── New product: full Register New Product form ── */}
+      {npiType === 'new_product' && (
+        <div style={{ background: 'var(--card)', borderRadius: 16, padding: 24, boxShadow: 'var(--shadow-sm)', marginBottom: 16, border: '0.5px solid var(--border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+            <div style={{ width: 28, height: 28, background: 'var(--navy-accent)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: 'white', flexShrink: 0 }}>1</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>Register New Product</div>
+          </div>
+
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 16, marginBottom: 16 }}>
             {[
               { key: 'sku',     label: 'New SKU Code',    placeholder: 'e.g. REF_225L_DC_2026', required: true },
@@ -255,7 +302,6 @@ export default function NPIForecasting() {
             ))}
           </div>
 
-          {/* Row 2: Category, Launch Date, Target Branches */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 16, marginBottom: 20 }}>
             <div>
               <label style={labelStyle}>Category<span style={{ color:'#DC2626', marginLeft:2 }}>*</span></label>
@@ -274,47 +320,6 @@ export default function NPIForecasting() {
               <div style={{ ...fieldStyle, color: 'var(--text-2)' }}>All 8 Branches selected</div>
             </div>
           </div>
-
-          {/* ── Renovation: LFL Predecessor Mapping ── */}
-          {npiType === 'renovation' && (
-            <div style={{ background: '#FFFBEB', borderRadius: 12, padding: 20, border: '1px solid #FCD34D', marginBottom: 20 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#92400E', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-                🔄 LFL Predecessor Mapping
-                <span style={{ fontSize: 11, fontWeight: 400, color: '#D97706' }}>— managed by your admin team</span>
-              </div>
-              <div>
-                <label style={{ ...labelStyle, color: '#92400E' }}>
-                  LFL Predecessor Mapping<span style={{ color:'#DC2626', marginLeft:2 }}>*</span>
-                </label>
-                {filteredLflCount === 0 ? (
-                  <div style={{ ...fieldStyle, background: '#F3F4F6', color: '#9CA3AF', border: '1px solid #E5E7EB', cursor: 'not-allowed' }}>
-                    No LFL mappings found. Ask your admin to add a mapping in the Admin Console.
-                  </div>
-                ) : (
-                  <select
-                    value={selectedLfl}
-                    onChange={e => setSelectedLfl(e.target.value)}
-                    style={{ ...fieldStyle, background: '#FFFEF5', borderColor: submitAttempted && !selectedLfl ? '#DC2626' : '#FCD34D' }}>
-                    <option value="">Select LFL mapping…</option>
-                    {lflMappings.map((l, i) => {
-                      if (form.sku && l.new_sku !== form.sku) return null;
-                      return (
-                        <option key={i} value={String(i)}>
-                          {l.old_sku} → {l.new_sku} (effective: {l.effective_date})
-                        </option>
-                      );
-                    })}
-                  </select>
-                )}
-                {submitAttempted && !selectedLfl && filteredLflCount > 0 && (
-                  <span style={{ color:'#DC2626', fontSize:10, marginTop:3, display:'block' }}>Required</span>
-                )}
-                <div style={{ fontSize: 10, color: '#D97706', marginTop: 6 }}>
-                  Select from LFL master — managed by your admin team.
-                </div>
-              </div>
-            </div>
-          )}
 
           <button onClick={handleGenerate} disabled={loading}
             style={{ background: loading ? '#6B7280' : 'var(--navy-accent)', color: 'white', border: 'none', borderRadius: 12, padding: '13px 28px', fontSize: 14, fontWeight: 700, cursor: loading ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 10, transition: 'opacity 0.15s' }}>
@@ -412,6 +417,7 @@ export default function NPIForecasting() {
         const phaseOutRows = computePhaseOut();
         const transDate    = getTransitionDate();
         const oldSkuName   = selectedLflEntry?.old_sku || 'Old SKU';
+        const newSkuName   = selectedLflEntry?.new_sku || 'New SKU';
         return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, animation: 'fadeUp 0.4s ease' }}>
 
@@ -459,7 +465,7 @@ export default function NPIForecasting() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
                 <div style={{ width: 28, height: 28, background: 'var(--navy-accent)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: 'white', flexShrink: 0 }}>B</div>
                 <div>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>New SKU Ramp Forecast — {form.sku || 'New SKU'}</div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>New SKU Ramp Forecast — {newSkuName}</div>
                   <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 2 }}>
                     Ramp starts {transDate ? transDate.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' }) : '—'} · Month 1 = channel fill (50%) · Months 2–6 = normal look-alike ramp
                   </div>
@@ -512,7 +518,7 @@ export default function NPIForecasting() {
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                   <thead>
                     <tr>
-                      {['Month', `${oldSkuName} Units`, `${form.sku || 'New SKU'} Units`, 'Combined Total'].map(h => (
+                      {['Month', `${oldSkuName} Units`, `${newSkuName} Units`, 'Combined Total'].map(h => (
                         <th key={h} style={thStyle}>{h}</th>
                       ))}
                     </tr>
