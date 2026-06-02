@@ -152,8 +152,8 @@ export default function ForecastSelection() {
   };
 
   /* ── Derived comparison data ── */
-  const sc = comparison?.scenarios || [];
-  const fbMap = comparison?.fallbackMap || {};
+  const sc = useMemo(() => comparison?.scenarios || [], [comparison]);
+  const fbMap = useMemo(() => comparison?.fallbackMap || {}, [comparison]);
 
   const getVal = useCallback((runsArr, branch, sku, month) => {
     if (!runsArr) return fbMap[`${branch}|${sku}|${month}`] || 1;
@@ -200,7 +200,7 @@ export default function ForecastSelection() {
       }
       return row;
     });
-  }, [sc, viewLevel, effBranches, effSkus, compCat, fbMap, getVal]);
+  }, [sc, viewLevel, effBranches, effSkus, compCat, getVal]);
 
   /* Deepdive table rows */
   const deepDiveRows = useMemo(() => {
@@ -238,7 +238,7 @@ export default function ForecastSelection() {
       rows.push({ label1:'National Total', label2:'', v1, v2, t1, t2, delta: t1>0?((t2-t1)/t1*100).toFixed(1):'0.0' });
     }
     return rows;
-  }, [sc, viewLevel, effBranches, effSkus, compCat, fbMap, getVal]);
+  }, [sc, viewLevel, effBranches, effSkus, compCat, getVal]);
 
   const getWinner = field => scenarios.reduce((best,s) => {
     if (field==='accuracy') return (!best||(s.accuracy||0)>(best.accuracy||0))?s:best;
