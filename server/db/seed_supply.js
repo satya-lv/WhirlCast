@@ -87,8 +87,11 @@ const SKU_LINE_CAT = {
 };
 const SAFETY_STOCK_WEEKS = {
   'REF_190L_DirectCool':2.0, 'REF_240L_FrostFree':2.0, 'REF_340L_TripleDoor':2.5,
-  'WM_7KG_TopLoad':2.0,      'WM_8KG_FrontLoad':2.0,   'WM_6.5KG_SemiAuto':1.5,
-  'AC_1.5T_Inverter':3.0,    'AC_2.0T_Split':3.0,
+  // WM: reduced 2.0/1.5→0.5 — same mismatch fix as AC.
+  // ratio = (1+ssWks)/(1+ssWks/10); at ssWks=0.5: 1.5/1.05 = 1.43 → ~143%.
+  'WM_7KG_TopLoad':0.5,      'WM_8KG_FrontLoad':0.5,   'WM_6.5KG_SemiAuto':0.5,
+  // AC: reduced 3.0→0.5 — same fix.
+  'AC_1.5T_Inverter':0.5,    'AC_2.0T_Split':0.5,
   'MW_25L_Convection':1.5,   'IH_3B_SmartGlass':1.5,
 };
 
