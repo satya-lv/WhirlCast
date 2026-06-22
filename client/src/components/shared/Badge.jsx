@@ -1,24 +1,34 @@
+/**
+ * Badge — status pill component.
+ *
+ * All color mappings are now sourced from statusConfig.js.
+ * Existing callers using type='success'/'warning'/'danger'/'info'/'purple'/'grey'/'navy'
+ * continue to work unchanged — those keys are all in STATUS_CONFIG.
+ *
+ * New modules can also pass inventory/branch status keys directly:
+ *   <Badge type="healthy" text="Healthy" />
+ *   <Badge type="below-rop" text="Below ROP" />
+ *   <Badge type="submitted_clean" text="Submitted" />
+ */
 import React from 'react';
-
-const configs = {
-  success: { bg: '#DCFCE7', color: '#16A34A' },
-  warning: { bg: '#FEF3C7', color: '#D97706' },
-  danger:  { bg: '#FEE2E2', color: '#DC2626' },
-  info:    { bg: '#EFF6FF', color: '#1D4ED8' },
-  purple:  { bg: '#F3E8FF', color: '#7C3AED' },
-  grey:    { bg: '#F3F4F6', color: '#6B7280' },
-  navy:    { bg: '#EFF3FF', color: '#1B3A6B' },
-};
+import { getStatusConfig } from '../../utils/statusConfig';
 
 export const Badge = ({ type = 'grey', text, style = {} }) => {
-  const c = configs[type] || configs.grey;
+  const { bg, color } = getStatusConfig(type);
   return (
     <span style={{
-      background: c.bg, color: c.color,
-      fontSize: 11, fontWeight: 600,
-      padding: '3px 9px', borderRadius: 20,
-      display: 'inline-flex', alignItems: 'center', gap: 3,
-      ...style
-    }}>{text}</span>
+      background: bg,
+      color,
+      fontSize: 11,
+      fontWeight: 600,
+      padding: '3px 9px',
+      borderRadius: 'var(--radius-xl)',
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 3,
+      ...style,
+    }}>
+      {text}
+    </span>
   );
 };

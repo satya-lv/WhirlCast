@@ -24,9 +24,28 @@
   --blue-bg:     #EFF6FF;
   --shadow-sm:   0 1px 3px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.06);
   --shadow-md:   0 4px 6px rgba(0,0,0,0.06), 0 10px 30px rgba(0,0,0,0.1);
-  --radius-sm:   8px;
-  --radius-md:   12px;
-  --radius-lg:   16px;
+
+  /* Border-radius scale */
+  --radius-xs:    6px;   /* status dots, tight icon badges */
+  --radius-sm:    8px;   /* inputs, small buttons */
+  --radius-md:   12px;   /* standard cards, panels */
+  --radius-lg:   16px;   /* large cards, modals */
+  --radius-xl:   20px;   /* pill badges, tab strips */
+  --radius-full: 9999px; /* circular elements */
+
+  /* Spacing scale — extracted from de facto usage across all pages.
+     Token name matches pixel value for zero-lookup ergonomics: var(--sp-16) = 16px. */
+  --sp-4:   4px;
+  --sp-6:   6px;
+  --sp-8:   8px;
+  --sp-10: 10px;
+  --sp-12: 12px;
+  --sp-14: 14px;
+  --sp-16: 16px;
+  --sp-18: 18px;
+  --sp-20: 20px;
+  --sp-24: 24px;
+  --sp-32: 32px;
 }
 
 [data-theme="dark"] {

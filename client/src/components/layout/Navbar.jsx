@@ -75,6 +75,11 @@ export default function Navbar() {
   };
 
   if (!user) return null;
+
+  // Desktop navigation is now handled by Sidebar.jsx.
+  // Navbar is mobile-only — it renders the slim top bar + hamburger overlay + bottom tabs.
+  if (!isMobile) return null;
+
   const tabs     = navConfig[user.role] || [];
   const initials = user.name?.split(' ').map(n => n[0]).join('').slice(0, 2);
   const bottomTabs = tabs.slice(0, 5);
@@ -88,7 +93,7 @@ export default function Navbar() {
         boxShadow: '0 1px 0 rgba(255,255,255,0.06)',
       }}>
         {/* Logo */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginRight: isMobile ? 'auto' : 32, flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginRight: 'auto', flexShrink: 0 }}>
           <svg width="26" height="26" viewBox="0 0 48 48">
             <rect width="48" height="48" rx="10" fill="#E31837"/>
             <polyline points="8,34 16,18 22,26 29,14 36,30 44,22"
@@ -101,72 +106,15 @@ export default function Navbar() {
           </div>
         </div>
 
-        {/* Desktop tabs */}
-        {!isMobile && (
-          <div style={{ display: 'flex', gap: 2, flex: 1, overflowX: 'auto' }}>
-            {tabs.map(tab => (
-              <NavLink key={tab.path} to={tab.path}
-                style={({ isActive }) => ({
-                  padding: '6px 14px', borderRadius: 8,
-                  fontSize: 13, fontWeight: isActive ? 600 : 400,
-                  color: isActive ? 'white' : 'rgba(255,255,255,0.5)',
-                  background: isActive ? 'rgba(255,255,255,0.12)' : 'transparent',
-                  textDecoration: 'none', whiteSpace: 'nowrap',
-                  transition: 'all 0.15s',
-                })}>
-                {tab.label}
-              </NavLink>
-            ))}
-          </div>
-        )}
-
-        {/* Right: dark toggle + user + logout (desktop) / hamburger (mobile) */}
-        {isMobile ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button onClick={() => setMenuOpen(o => !o)}
-              style={{ background: 'rgba(255,255,255,0.08)', border: '0.5px solid rgba(255,255,255,0.12)',
-                color: 'white', borderRadius: 8, padding: '6px 10px',
-                fontSize: 16, cursor: 'pointer', lineHeight: 1 }}>
-              {menuOpen ? '✕' : '☰'}
-            </button>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-            <button onClick={toggleTheme}
-              style={{ background: 'rgba(255,255,255,0.08)', border: '0.5px solid rgba(255,255,255,0.12)',
-                color: 'rgba(255,255,255,0.55)', borderRadius: 8, padding: '5px 10px',
-                fontSize: 12, cursor: 'pointer', marginRight: 8 }}>
-              {dark ? '☀ Light' : '◑ Dark'}
-            </button>
-            <button onClick={() => setShowResetModal(true)} disabled={resetting}
-              style={{ background: 'transparent', border: '0.5px solid rgba(255,255,255,0.25)',
-                color: 'rgba(255,255,255,0.55)', borderRadius: 7, padding: '5px 10px',
-                fontSize: 11, cursor: 'pointer', marginRight: 2 }}>
-              {resetting ? '⟳' : '↺ Reset'}
-            </button>
-            <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'white' }}>{user.name}</div>
-              <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>
-                {user.role === 'branch_sales'    ? `Branch · ${user.branch}` :
-                 user.role === 'demand_planning' ? 'Demand Planner' :
-                 user.role === 'category_team'   ? 'Category Manager' : 'Administrator'}
-              </div>
-            </div>
-            <div style={{
-              width: 32, height: 32, borderRadius: '50%', display: 'flex',
-              alignItems: 'center', justifyContent: 'center',
-              background: roleColors[user.role] || '#6B7280',
-              fontSize: 12, fontWeight: 700, color: 'white',
-            }}>{initials}</div>
-            <button onClick={() => { logout(); navigate('/login'); }}
-              title="Logout"
-              style={{ background: 'rgba(255,255,255,0.08)', border: '0.5px solid rgba(255,255,255,0.12)',
-                color: 'rgba(255,255,255,0.5)', borderRadius: 6, padding: '5px 10px',
-                fontSize: 11, cursor: 'pointer' }}>
-              ⏻
-            </button>
-          </div>
-        )}
+        {/* Hamburger */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button onClick={() => setMenuOpen(o => !o)}
+            style={{ background: 'rgba(255,255,255,0.08)', border: '0.5px solid rgba(255,255,255,0.12)',
+              color: 'white', borderRadius: 8, padding: '6px 10px',
+              fontSize: 16, cursor: 'pointer', lineHeight: 1 }}>
+            {menuOpen ? '✕' : '☰'}
+          </button>
+        </div>
       </nav>
 
       {/* Mobile hamburger overlay menu */}
