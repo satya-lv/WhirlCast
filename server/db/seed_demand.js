@@ -169,10 +169,16 @@ function seedDemand(force = false) {
           const actualSeed = skuIdx * 10000 + locIdx * 100 + wk;
           const actual    = Math.max(1, Math.round(weeklyBase * branchFactor * seasonal * pseudoRand(actualSeed)));
 
-          // Forecast error: wider during seasonal extremes so MAPE exceptions trigger naturally.
+          // Forecast error: asymmetric distribution allowing genuine under-forecasting (~23% of rows).
+          // Normalise pseudoRand [0.85, 1.15] → r [0, 1], then map to [lo, hi] explicitly.
+          // Under-forecast when r < (1.0 - lo) / (hi - lo): 23.3% normal, 26.7% extreme.
+          // Mean fcastError: 1.08 (+8%) normal, ~1.12 (+12%) extreme (wider, seasonally harder to forecast).
           const fcastSeed  = actualSeed + 50000;
-          const errorRange = (seasonal > 2.0 || seasonal < 0.2) ? 0.40 : 0.27;
-          const fcastError = Math.min(1.30, Math.max(0.70, 0.88 + pseudoRand(fcastSeed) * errorRange));
+          const r          = (pseudoRand(fcastSeed) - 0.85) / 0.30;   // [0, 1]
+          const isExtreme  = seasonal > 2.0 || seasonal < 0.2;
+          const lo         = isExtreme ? 0.84 : 0.93;
+          const hi         = isExtreme ? 1.44 : 1.23;
+          const fcastError = Math.min(1.30, Math.max(0.70, lo + r * (hi - lo)));
           const forecast   = Math.max(1, Math.round(actual * fcastError));
 
           const plannerAdj = overrideMap[overrideKey(sku, locationId, wk)] || 0;
@@ -308,5 +314,5 @@ function seedDemand(force = false) {
   console.log('[seed_demand] Exception seeding complete.');
 }
 
-if (require.main === module) seedDemand();
+if (require.main === module) seedDemand(process.argv.includes('--force'));
 module.exports = { seedDemand, computeAbcXyzClassification };

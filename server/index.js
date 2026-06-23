@@ -22,6 +22,7 @@ app.use('/api/admin', require('./routes/admin'));
 app.use('/api/demo',  require('./routes/demo'));
 app.use('/api/cycles', require('./routes/cycles'));
 app.use('/api/supply', require('./routes/supply'));
+app.use('/api/demand-planning', require('./routes/demand_planning'));
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', app: 'WhirlCast', version: '1.0.0' }));
 

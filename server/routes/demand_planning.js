@@ -1,0 +1,649 @@
+'use strict';
+/**
+ * demand_planning.js — Demand Planning Workbench API (Step A.2)
+ *
+ * Endpoints:
+ *   GET   /api/demand-planning/filters
+ *   GET   /api/demand-planning/kpis
+ *   GET   /api/demand-planning/grid
+ *   PATCH /api/demand-planning/grid/adjustment
+ *   GET   /api/demand-planning/patterns
+ *   POST  /api/demand-planning/patterns/recalculate-classification
+ *   GET   /api/demand-planning/exceptions
+ *   PATCH /api/demand-planning/exceptions/:id/acknowledge
+ */
+const express = require('express');
+const router  = express.Router();
+const { getDb } = require('../db/schema');
+const { computeAbcXyzClassification } = require('../db/seed_demand');
+
+const EDITABLE_FROM_WEEK = 27;
+const DEMAND_YEAR        = 2025;
+
+// ── Shared helpers ─────────────────────────────────────────────────────────
+
+// SKU family → member SKUs (mirrors seed.js PRODUCTS categories)
+const SKU_FAMILIES = {
+  'Air Conditioner':          ['AC_1.5T_Inverter', 'AC_2.0T_Split'],
+  'Direct Cool Refrigerator': ['REF_190L_DirectCool'],
+  'Frost Free Refrigerator':  ['REF_240L_FrostFree', 'REF_340L_TripleDoor'],
+  'Washing Machine':          ['WM_7KG_TopLoad', 'WM_8KG_FrontLoad', 'WM_6.5KG_SemiAuto'],
+  'Microwave':                ['MW_25L_Convection'],
+  'Induction':                ['IH_3B_SmartGlass'],
+};
+
+// Builds a WHERE clause + params array for demand_weekly_data (alias dwd)
+// joined to product_master (alias pm). All filters are optional.
+function buildDemandWhere(query) {
+  const conds  = [`dwd.year = ${DEMAND_YEAR}`];
+  const params = [];
+
+  if (query.locationId) {
+    conds.push('dwd.location_id = ?');
+    params.push(parseInt(query.locationId));
+  }
+  if (query.sku) {
+    conds.push('dwd.sku = ?');
+    params.push(query.sku);
+  }
+  if (query.skuFamily && SKU_FAMILIES[query.skuFamily]) {
+    const skus = SKU_FAMILIES[query.skuFamily];
+    conds.push(`dwd.sku IN (${skus.map(() => '?').join(',')})`);
+    params.push(...skus);
+  }
+  if (query.abcClass) {
+    conds.push('pm.abc_class = ?');
+    params.push(query.abcClass);
+  }
+  if (query.xyzClass) {
+    conds.push('pm.xyz_class = ?');
+    params.push(query.xyzClass);
+  }
+
+  return { where: conds.join(' AND '), params };
+}
+
+// Linear regression slope (units per week) over an ordered array of values.
+function regressionSlope(values) {
+  const n = values.length;
+  if (n < 2) return 0;
+  const xMean = (n - 1) / 2;
+  const yMean = values.reduce((a, b) => a + b, 0) / n;
+  let num = 0, den = 0;
+  for (let i = 0; i < n; i++) {
+    num += (i - xMean) * (values[i] - yMean);
+    den += (i - xMean) ** 2;
+  }
+  return den === 0 ? 0 : num / den;
+}
+
+// Classify a SKU's demand pattern from its 52 ordered weekly national totals.
+// Priority when multiple rules fire: Seasonal > Trend > Random > Stable.
+// Thresholds:
+//   Seasonal = max(H1_mean, H2_mean) / min > 2.0
+//   Trend    = |regression slope| > 5% of overall mean per week
+//   Random   = CoV >= 0.5 and not Seasonal
+//   Stable   = remainder
+function classifyPattern(weeklyTotals) {
+  const n = weeklyTotals.length;
+  if (n < 4) return { patternType: 'Stable', h1h2Ratio: 1, slopePctOfMean: 0 };
+
+  const h1Mean = weeklyTotals.slice(0, 26).reduce((a, b) => a + b, 0) / 26;
+  const h2Mean = weeklyTotals.slice(26, 52).reduce((a, b) => a + b, 0) / 26;
+  const h1h2Ratio = (h1Mean > 0 && h2Mean > 0)
+    ? parseFloat((Math.max(h1Mean, h2Mean) / Math.min(h1Mean, h2Mean)).toFixed(2))
+    : 1;
+
+  const overall = weeklyTotals.reduce((a, b) => a + b, 0) / n;
+  const slope   = regressionSlope(weeklyTotals);
+  const slopePctOfMean = overall > 0
+    ? parseFloat(Math.abs((slope / overall)).toFixed(4))
+    : 0;
+
+  const variance = weeklyTotals.reduce((s, v) => s + (v - overall) ** 2, 0) / n;
+  const cov      = overall > 0 ? Math.sqrt(variance) / overall : 0;
+
+  let patternType;
+  if      (h1h2Ratio > 2.0)       patternType = 'Seasonal';
+  else if (slopePctOfMean > 0.05)  patternType = 'Trend';
+  else if (cov >= 0.5)             patternType = 'Random';
+  else                             patternType = 'Stable';
+
+  return { patternType, h1h2Ratio, slopePctOfMean };
+}
+
+// ── GET /api/demand-planning/filters ──────────────────────────────────────
+
+router.get('/filters', (req, res) => {
+  try {
+    const db = getDb();
+    const locations = db.prepare(`
+      SELECT location_id AS locationId, name, region
+      FROM locations
+      ORDER BY region, name
+    `).all();
+    const skus = db.prepare(`
+      SELECT sku, category, abc_class AS abcClass, xyz_class AS xyzClass
+      FROM product_master
+      WHERE active = 1
+      ORDER BY category, sku
+    `).all();
+    db.close();
+    res.json({
+      locations,
+      skuFamilies: Object.keys(SKU_FAMILIES),
+      skus,
+      abcClasses: ['A', 'B', 'C'],
+      xyzClasses: ['X', 'Y', 'Z'],
+      weekRange:  { min: 1, max: 52, editableFrom: EDITABLE_FROM_WEEK, year: DEMAND_YEAR },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/demand-planning/kpis ─────────────────────────────────────────
+// All 8 KPI bar values. Query params apply the same filters as /grid.
+// Each KPI includes a `source` field tracing the number back to its table/column.
+
+router.get('/kpis', (req, res) => {
+  try {
+    const db = getDb();
+    const { where, params } = buildDemandWhere(req.query);
+
+    // Single-pass aggregate for most KPIs
+    const agg = db.prepare(`
+      SELECT
+        SUM(dwd.final_consensus)                                                                  AS totalForecastDemand,
+        SUM(dwd.final_consensus * pm.price)                                                       AS revenueForecast,
+        COUNT(CASE WHEN dwd.planner_adjustment != 0 THEN 1 END)                                  AS openPlannerAdjustments,
+        AVG(CASE WHEN dwd.actual_sales > 0
+              THEN ABS(dwd.actual_sales - dwd.system_forecast) * 1.0 / dwd.actual_sales
+              ELSE NULL END)                                                                       AS mape,
+        AVG(CASE WHEN dwd.actual_sales > 0
+              THEN (dwd.system_forecast - dwd.actual_sales) * 1.0 / dwd.actual_sales
+              ELSE NULL END)                                                                       AS bias,
+        SUM(CASE WHEN pm.abc_class = 'A' THEN dwd.final_consensus ELSE 0 END)                   AS aClassDemand
+      FROM demand_weekly_data dwd
+      JOIN product_master pm ON dwd.sku = pm.sku
+      WHERE ${where}
+    `).get(...params);
+
+    // Inventory days: demand-weighted average of safety_stock_weeks × 7 per SKU.
+    // Joining to planning_orders would misalign years (2026 supply vs 2025 demand),
+    // so sku_planning_params.safety_stock_weeks is the cleanest available proxy.
+    const invRows = db.prepare(`
+      SELECT dwd.sku,
+             spp.safety_stock_weeks,
+             AVG(dwd.final_consensus) AS meanWeeklyDemand
+      FROM demand_weekly_data dwd
+      JOIN sku_planning_params spp ON dwd.sku = spp.sku
+      JOIN product_master pm       ON dwd.sku = pm.sku
+      WHERE ${where}
+      GROUP BY dwd.sku
+    `).all(...params);
+
+    let weightedDays = 0, totalWeight = 0;
+    for (const r of invRows) {
+      weightedDays += r.safety_stock_weeks * 7 * r.meanWeeklyDemand;
+      totalWeight  += r.meanWeeklyDemand;
+    }
+    const inventoryDays = totalWeight > 0
+      ? parseFloat((weightedDays / totalWeight).toFixed(1))
+      : 0;
+
+    // Open exceptions count is portfolio-wide (not filtered by SKU/location)
+    const openExcCount = db.prepare(
+      'SELECT COUNT(*) AS c FROM demand_exceptions WHERE acknowledged = 0'
+    ).get().c;
+
+    db.close();
+
+    const totalDemand  = agg.totalForecastDemand || 0;
+    const aClassDemand = agg.aClassDemand        || 0;
+    const mape         = agg.mape                || 0;
+    const bias         = agg.bias                || 0;
+
+    res.json({
+      kpis: {
+        totalForecastDemand: {
+          value:  Math.round(totalDemand),
+          unit:   'units',
+          label:  'Total Forecast Demand',
+          source: 'SUM(final_consensus) — demand_weekly_data, all 52 weeks, filtered set',
+        },
+        forecastAccuracyPct: {
+          value:  parseFloat(((1 - mape) * 100).toFixed(1)),
+          unit:   '%',
+          label:  'Forecast Accuracy %',
+          source: '(1 − MAPE) × 100, MAPE = mean(|actual_sales − system_forecast| / actual_sales) WHERE actual_sales > 0',
+        },
+        biasPct: {
+          value:  parseFloat((bias * 100).toFixed(1)),
+          unit:   '%',
+          label:  'Bias %',
+          source: 'mean((system_forecast − actual_sales) / actual_sales) × 100; positive = systematic over-forecast',
+        },
+        openPlannerAdjustments: {
+          value:  agg.openPlannerAdjustments || 0,
+          unit:   'count',
+          label:  'Open Planner Adjustments',
+          source: 'COUNT(rows WHERE planner_adjustment ≠ 0) — demand_weekly_data, filtered set',
+        },
+        revenueForecast: {
+          value:  Math.round(agg.revenueForecast || 0),
+          unit:   'INR',
+          label:  'Revenue Forecast',
+          source: 'SUM(final_consensus × price) — demand_weekly_data JOIN product_master, filtered set',
+        },
+        inventoryDays: {
+          value:  inventoryDays,
+          unit:   'days',
+          label:  'Target Inventory Coverage',
+          source: 'Demand-weighted avg of (safety_stock_weeks × 7) from sku_planning_params; proxy for target coverage days since no ending_inventory exists in demand_weekly_data',
+        },
+        aClassCoveragePct: {
+          value:  totalDemand > 0
+            ? parseFloat((aClassDemand / totalDemand * 100).toFixed(1))
+            : 0,
+          unit:   '%',
+          label:  'A-Class Coverage %',
+          source: "SUM(final_consensus WHERE abc_class='A') / SUM(final_consensus) × 100 — demand_weekly_data JOIN product_master",
+        },
+        openExceptions: {
+          value:  openExcCount,
+          unit:   'count',
+          label:  'Open Exceptions',
+          source: 'COUNT(*) FROM demand_exceptions WHERE acknowledged = 0 (portfolio-wide, not filtered)',
+        },
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/demand-planning/grid ─────────────────────────────────────────
+// 52-week planning grid. Rows = sku × location combos; cells keyed by week_number.
+// Query params: locationId, skuFamily, sku, abcClass, xyzClass,
+//               weekStart (def 1), weekEnd (def 52), page (def 1), pageSize (def 20)
+
+router.get('/grid', (req, res) => {
+  try {
+    const db       = getDb();
+    const weekStart = Math.max(1,  Math.min(52, parseInt(req.query.weekStart) || 1));
+    const rawEnd    = parseInt(req.query.weekEnd) || 52;
+    const weekEnd   = Math.max(weekStart, Math.min(52, rawEnd));
+    const page      = Math.max(1, parseInt(req.query.page)     || 1);
+    const pageSize  = Math.min(50, Math.max(1, parseInt(req.query.pageSize) || 20));
+
+    const { where, params } = buildDemandWhere(req.query);
+
+    // Total distinct sku-location combos for pagination metadata
+    const { n: total } = db.prepare(`
+      SELECT COUNT(DISTINCT dwd.sku || '|' || dwd.location_id) AS n
+      FROM demand_weekly_data dwd
+      JOIN product_master pm ON dwd.sku = pm.sku
+      WHERE ${where}
+    `).get(...params);
+
+    // All cells in [weekStart, weekEnd] for the filtered set
+    const cells = db.prepare(`
+      SELECT dwd.sku, dwd.location_id, dwd.week_number,
+             dwd.actual_sales, dwd.system_forecast,
+             dwd.planner_adjustment, dwd.final_consensus,
+             l.name AS location_name, l.region,
+             pm.category AS sku_family, pm.abc_class, pm.xyz_class
+      FROM demand_weekly_data dwd
+      JOIN locations l     ON dwd.location_id = l.location_id
+      JOIN product_master pm ON dwd.sku = pm.sku
+      WHERE ${where} AND dwd.week_number BETWEEN ? AND ?
+      ORDER BY pm.category, dwd.sku, l.region, l.name, dwd.week_number
+    `).all(...params, weekStart, weekEnd);
+
+    // Group cells into rows keyed by sku|locationId
+    const rowMap = new Map();
+    for (const c of cells) {
+      const key = `${c.sku}|${c.location_id}`;
+      if (!rowMap.has(key)) {
+        rowMap.set(key, {
+          sku:          c.sku,
+          skuFamily:    c.sku_family,
+          abcClass:     c.abc_class,
+          xyzClass:     c.xyz_class,
+          locationId:   c.location_id,
+          locationName: c.location_name,
+          region:       c.region,
+          cells:        {},
+        });
+      }
+      rowMap.get(key).cells[c.week_number] = {
+        actualSales:       c.actual_sales,
+        systemForecast:    c.system_forecast,
+        plannerAdjustment: c.planner_adjustment,
+        finalConsensus:    c.final_consensus,
+        editable:          c.week_number >= EDITABLE_FROM_WEEK,
+      };
+    }
+
+    const allRows  = [...rowMap.values()];
+    const pageRows = allRows.slice((page - 1) * pageSize, page * pageSize);
+
+    db.close();
+    res.json({
+      weeks:      Array.from({ length: weekEnd - weekStart + 1 }, (_, i) => weekStart + i),
+      weekRange:  { start: weekStart, end: weekEnd, editableFrom: EDITABLE_FROM_WEEK },
+      year:       DEMAND_YEAR,
+      rows:       pageRows,
+      pagination: { total, page, pageSize, totalPages: Math.ceil(total / pageSize) },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── PATCH /api/demand-planning/grid/adjustment ────────────────────────────
+// Update a single planner_adjustment cell. Weeks < 27 are locked historical.
+// final_consensus is a GENERATED column — SQLite recomputes it automatically.
+//
+// Body: { sku, locationId, weekNumber, year?, plannerAdjustment }
+
+router.patch('/grid/adjustment', (req, res) => {
+  try {
+    const { sku, locationId, weekNumber, plannerAdjustment } = req.body;
+    const year = parseInt(req.body.year) || DEMAND_YEAR;
+
+    if (!sku || locationId == null || weekNumber == null || plannerAdjustment == null) {
+      return res.status(400).json({
+        error: 'sku, locationId, weekNumber, plannerAdjustment are required',
+      });
+    }
+
+    const wk    = parseInt(weekNumber);
+    const locId = parseInt(locationId);
+    const adj   = parseFloat(plannerAdjustment);
+
+    if (wk < EDITABLE_FROM_WEEK) {
+      return res.status(400).json({
+        error: `Week ${wk} is a locked historical week (editable from week ${EDITABLE_FROM_WEEK})`,
+      });
+    }
+
+    const db = getDb();
+
+    const result = db.prepare(`
+      UPDATE demand_weekly_data
+      SET planner_adjustment = ?
+      WHERE sku = ? AND location_id = ? AND week_number = ? AND year = ?
+    `).run(adj, sku, locId, wk, year);
+
+    if (result.changes === 0) {
+      db.close();
+      return res.status(404).json({ error: 'Row not found' });
+    }
+
+    const updated = db.prepare(`
+      SELECT sku,
+             location_id       AS locationId,
+             week_number       AS weekNumber,
+             year,
+             system_forecast   AS systemForecast,
+             planner_adjustment AS plannerAdjustment,
+             final_consensus   AS finalConsensus
+      FROM demand_weekly_data
+      WHERE sku = ? AND location_id = ? AND week_number = ? AND year = ?
+    `).get(sku, locId, wk, year);
+
+    db.close();
+    res.json({ success: true, updated });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/demand-planning/patterns ─────────────────────────────────────
+// Returns three sub-sections:
+//   classificationDistribution — Trend/Seasonal/Stable/Random counts, per-SKU nationally
+//   scatter                    — 10 points (one per SKU), x=volume, y=CoV
+//   table                      — 80 rows (SKU × location), filtered; badge = per-SKU class
+
+router.get('/patterns', (req, res) => {
+  try {
+    const db = getDb();
+
+    // ── National weekly totals per SKU (full portfolio, no filters) ──────
+    // Used for both classificationDistribution and scatter.
+    const nationalRows = db.prepare(`
+      SELECT sku, week_number, SUM(actual_sales) AS national_total
+      FROM demand_weekly_data
+      WHERE year = ${DEMAND_YEAR}
+      GROUP BY sku, week_number
+      ORDER BY sku, week_number
+    `).all();
+
+    // Build SKU → [52 weekly totals in order] map
+    const skuWeekly = {};
+    for (const r of nationalRows) {
+      if (!skuWeekly[r.sku]) skuWeekly[r.sku] = [];
+      skuWeekly[r.sku].push(r.national_total);
+    }
+
+    // National annual volume per SKU (for scatter x-axis)
+    const annualNational = {};
+    for (const [sku, weeks] of Object.entries(skuWeekly)) {
+      annualNational[sku] = weeks.reduce((a, b) => a + b, 0);
+    }
+
+    // Product master (abc/xyz/cov for all SKUs)
+    const pmAll = db.prepare(`
+      SELECT sku, category, abc_class AS abcClass, xyz_class AS xyzClass, cov
+      FROM product_master
+      WHERE active = 1
+      ORDER BY category, sku
+    `).all();
+
+    // Classify each SKU and collect results
+    const classificationBySku = {};
+    for (const pm of pmAll) {
+      const weekly = skuWeekly[pm.sku] || [];
+      classificationBySku[pm.sku] = classifyPattern(weekly);
+    }
+
+    // ── classificationDistribution ───────────────────────────────────────
+    const counts = { Seasonal: 0, Trend: 0, Random: 0, Stable: 0 };
+    for (const { patternType } of Object.values(classificationBySku)) {
+      if (counts[patternType] !== undefined) counts[patternType]++;
+    }
+
+    const classificationDistribution = {
+      counts,
+      total: pmAll.length,
+      methodology:
+        'Seasonal = H1/H2 demand ratio > 2.0; Trend = |regression slope| > 5% of mean/week; Random = CoV ≥ 0.5 and not Seasonal; Stable = remainder. Computed from national weekly totals (SUM across 8 locations) in demand_weekly_data.',
+      bySku: pmAll.map(pm => ({
+        sku:            pm.sku,
+        patternType:    classificationBySku[pm.sku].patternType,
+        h1h2Ratio:      classificationBySku[pm.sku].h1h2Ratio,
+        slopePctOfMean: classificationBySku[pm.sku].slopePctOfMean,
+        cov:            parseFloat((pm.cov || 0).toFixed(3)),
+      })),
+    };
+
+    // ── scatter ───────────────────────────────────────────────────────────
+    const scatter = pmAll.map(pm => ({
+      sku:         pm.sku,
+      category:    pm.category,
+      abcClass:    pm.abcClass,
+      xyzClass:    pm.xyzClass,
+      patternType: classificationBySku[pm.sku].patternType,
+      totalVolume: Math.round(annualNational[pm.sku] || 0),
+      cov:         parseFloat((pm.cov || 0).toFixed(3)),
+    }));
+
+    // ── table (filtered) ─────────────────────────────────────────────────
+    const { where, params } = buildDemandWhere(req.query);
+    const tableRows = db.prepare(`
+      SELECT dwd.sku, dwd.location_id,
+             l.name AS locationName, l.region,
+             pm.category, pm.abc_class AS abcClass, pm.xyz_class AS xyzClass, pm.cov,
+             SUM(dwd.actual_sales)   AS annualVolume,
+             AVG(dwd.actual_sales)   AS weeklyAvg,
+             SQRT(MAX(0,
+               AVG(dwd.actual_sales * dwd.actual_sales)
+               - AVG(dwd.actual_sales) * AVG(dwd.actual_sales)
+             ))                      AS weeklyStddev
+      FROM demand_weekly_data dwd
+      JOIN locations l     ON dwd.location_id = l.location_id
+      JOIN product_master pm ON dwd.sku = pm.sku
+      WHERE ${where}
+      GROUP BY dwd.sku, dwd.location_id
+      ORDER BY pm.category, dwd.sku, l.region, l.name
+    `).all(...params);
+
+    const table = tableRows.map(r => ({
+      sku:          r.sku,
+      locationId:   r.location_id,
+      locationName: r.locationName,
+      region:       r.region,
+      category:     r.category,
+      abcClass:     r.abcClass,
+      xyzClass:     r.xyzClass,
+      patternType:  (classificationBySku[r.sku] || {}).patternType || 'Stable',
+      cov:          parseFloat((r.cov || 0).toFixed(3)),
+      annualVolume: Math.round(r.annualVolume),
+      weeklyAvg:    parseFloat((r.weeklyAvg  || 0).toFixed(1)),
+      weeklyStddev: parseFloat((r.weeklyStddev || 0).toFixed(1)),
+    }));
+
+    db.close();
+    res.json({ classificationDistribution, scatter, table });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/demand-planning/patterns/recalculate-classification ─────────
+// Re-runs ABC/XYZ computation from forecast_runs 2025 monthly history
+// and writes updated columns to product_master. Matches spec Section 7's
+// "manual Recalculate button" requirement.
+
+router.post('/patterns/recalculate-classification', (req, res) => {
+  try {
+    const db    = getDb();
+    const stats = computeAbcXyzClassification(db);
+    db.close();
+    res.json({
+      success:         true,
+      updatedAt:       new Date().toISOString(),
+      classifications: stats.map(s => ({
+        sku:      s.sku,
+        abcClass: s.abc_class,
+        xyzClass: s.xyz_class,
+        cov:      parseFloat(s.cov.toFixed(3)),
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/demand-planning/exceptions ───────────────────────────────────
+// Returns demand_exceptions rows with summary counts.
+// Query params (all optional): severity, category, locationId, sku, acknowledged
+
+router.get('/exceptions', (req, res) => {
+  try {
+    const db = getDb();
+
+    const conds  = [];
+    const params = [];
+
+    if (req.query.severity)   { conds.push('de.severity = ?');    params.push(req.query.severity); }
+    if (req.query.category)   { conds.push('de.category = ?');    params.push(req.query.category); }
+    if (req.query.locationId) { conds.push('de.location_id = ?'); params.push(parseInt(req.query.locationId)); }
+    if (req.query.sku)        { conds.push('de.sku = ?');          params.push(req.query.sku); }
+    if (req.query.acknowledged !== undefined) {
+      conds.push('de.acknowledged = ?');
+      params.push(parseInt(req.query.acknowledged));
+    }
+
+    const whereClause = conds.length > 0 ? 'WHERE ' + conds.join(' AND ') : '';
+
+    const rows = db.prepare(`
+      SELECT de.exception_id    AS exceptionId,
+             de.sku,
+             de.location_id     AS locationId,
+             l.name             AS locationName,
+             de.week_number     AS weekNumber,
+             de.year,
+             de.category,
+             de.severity,
+             de.financial_impact AS financialImpact,
+             de.title,
+             de.detail,
+             de.recommendation,
+             de.acknowledged,
+             de.created_at      AS createdAt
+      FROM demand_exceptions de
+      JOIN locations l ON de.location_id = l.location_id
+      ${whereClause}
+      ORDER BY
+        CASE de.severity WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+        de.financial_impact DESC
+    `).all(...params);
+
+    db.close();
+
+    const bySeverity = { high: 0, medium: 0, low: 0 };
+    const byCategory = {
+      accuracy_degradation: 0,
+      large_override:       0,
+      pattern_shift:        0,
+      npi_risk:             0,
+    };
+    for (const r of rows) {
+      if (bySeverity[r.severity]  !== undefined) bySeverity[r.severity]++;
+      if (byCategory[r.category] !== undefined)  byCategory[r.category]++;
+    }
+
+    res.json({
+      total:      rows.length,
+      openCount:  rows.filter(r => r.acknowledged === 0).length,
+      bySeverity,
+      byCategory,
+      exceptions: rows,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── PATCH /api/demand-planning/exceptions/:id/acknowledge ─────────────────
+// Acknowledge (or un-acknowledge) a demand exception.
+// Body: { acknowledged: 1 | 0 }
+
+router.patch('/exceptions/:id/acknowledge', (req, res) => {
+  try {
+    const id           = parseInt(req.params.id);
+    const { acknowledged } = req.body;
+
+    if (acknowledged === undefined || acknowledged === null) {
+      return res.status(400).json({ error: 'acknowledged field is required (0 or 1)' });
+    }
+
+    const db     = getDb();
+    const result = db.prepare(
+      'UPDATE demand_exceptions SET acknowledged = ? WHERE exception_id = ?'
+    ).run(acknowledged ? 1 : 0, id);
+    db.close();
+
+    if (result.changes === 0) {
+      return res.status(404).json({ error: `Exception ${id} not found` });
+    }
+    res.json({ success: true, exceptionId: id, acknowledged: acknowledged ? 1 : 0 });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+module.exports = router;
