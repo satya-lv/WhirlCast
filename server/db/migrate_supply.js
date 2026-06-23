@@ -194,4 +194,5 @@ function runMigration() {
   console.log('Supply planning migration complete.');
 }
 
-runMigration();
+if (require.main === module) runMigration();
+module.exports = runMigration;

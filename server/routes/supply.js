@@ -1114,7 +1114,7 @@ router.delete('/scenarios/:id', (req, res) => {
 router.post('/reset', (req, res) => {
   try {
     const seedSupply = require('../db/seed_supply');
-    seedSupply();
+    seedSupply(true);
     res.json({ success: true, message: 'Supply planning data reset to original seed state' });
   } catch (err) {
     console.error('=== SUPPLY ROUTE ERROR ===', err.message, '\nSTACK:', err.stack);

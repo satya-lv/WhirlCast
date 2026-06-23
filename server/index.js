@@ -35,7 +35,7 @@ app.listen(PORT, () => {
   console.log(`WhirlCast API running on http://localhost:${PORT}`);
 
   // === TEMP DIAGNOSTIC: Railway DB check (remove after diagnosis) ===
-  const dbPath = path.join(__dirname, 'db', 'demandiq.db');
+  const dbPath = process.env.DB_PATH || path.join(__dirname, 'db', 'demandiq.db');
   const dbExists = fs.existsSync(dbPath);
   console.log('[DIAG] DB path:', dbPath);
   console.log('[DIAG] DB file exists:', dbExists);

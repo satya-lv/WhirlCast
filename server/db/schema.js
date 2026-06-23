@@ -1,7 +1,7 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 
-const DB_PATH = path.join(__dirname, 'demandiq.db');
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'demandiq.db');
 
 function getDb() {
   return new Database(DB_PATH);

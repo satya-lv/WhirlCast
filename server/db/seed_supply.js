@@ -334,7 +334,18 @@ function computeAllPlanning() {
 
 // ── Phase 2: DB operations ─────────────────────────────────────────────────
 
-function seedSupply() {
+function seedSupply(force = false) {
+  if (!force) {
+    const checkDb = getDb();
+    let cnt = 0;
+    try { cnt = checkDb.prepare('SELECT COUNT(*) as c FROM planning_orders').get().c; } catch (_) {}
+    checkDb.close();
+    if (cnt > 0) {
+      console.log('[seed_supply] planning_orders already has data — skipping seed.');
+      return;
+    }
+  }
+
   // Compute everything before touching the DB
   const { rows, computedOnHand, compDraw, quarterlyReceipt } = computeAllPlanning();
 
