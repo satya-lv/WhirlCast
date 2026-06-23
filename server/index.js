@@ -2,7 +2,6 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const fs = require('fs');
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -33,26 +32,4 @@ if (process.env.NODE_ENV === 'production') {
 
 app.listen(PORT, () => {
   console.log(`WhirlCast API running on http://localhost:${PORT}`);
-
-  // === TEMP DIAGNOSTIC: Railway DB check (remove after diagnosis) ===
-  const dbPath = process.env.DB_PATH || path.join(__dirname, 'db', 'demandiq.db');
-  const dbExists = fs.existsSync(dbPath);
-  console.log('[DIAG] DB path:', dbPath);
-  console.log('[DIAG] DB file exists:', dbExists);
-  if (dbExists) {
-    try {
-      const Database = require('better-sqlite3');
-      const diagDb = new Database(dbPath, { readonly: true });
-      try {
-        const row = diagDb.prepare('SELECT COUNT(*) as cnt FROM planning_orders').get();
-        console.log('[DIAG] planning_orders row count:', row.cnt);
-      } catch (qErr) {
-        console.log('[DIAG] planning_orders query failed:', qErr.message);
-      }
-      diagDb.close();
-    } catch (dbErr) {
-      console.log('[DIAG] better-sqlite3 open failed:', dbErr.message);
-    }
-  }
-  // === END TEMP DIAGNOSTIC ===
 });
