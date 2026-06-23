@@ -68,6 +68,9 @@ function seed() {
   initSchema();
   const db = getDb();
 
+  // Disable FK enforcement for the delete phase so supply-planning tables
+  // that reference product_master don't block the wipe on subsequent deploys.
+  db.exec('PRAGMA foreign_keys = OFF');
   db.exec('DELETE FROM npi_forecasts');
   db.exec('DELETE FROM exception_log');
   db.exec('DELETE FROM demand_sensing_log');
@@ -78,6 +81,7 @@ function seed() {
   db.exec('DELETE FROM lfl_master');
   db.exec('DELETE FROM product_master');
   db.exec('DELETE FROM users');
+  db.exec('PRAGMA foreign_keys = ON');
 
   // Products
   const insertProduct = db.prepare(`INSERT OR REPLACE INTO product_master (sku, category, segment, subsegment, price, star_rating, active, launch_date) VALUES (?,?,?,?,?,?,1,'2023-01-01')`);
