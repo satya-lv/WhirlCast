@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "scripts": {
     "build": "npm install --prefix server && npm install --prefix client && npm run build --prefix client",
-    "start": "NODE_ENV=production node server/db/seed.js && NODE_ENV=production node server/db/setup_supply.js && NODE_ENV=production node server/index.js"
+    "start": "NODE_ENV=production node server/db/seed.js && NODE_ENV=production node server/db/setup_supply.js && NODE_ENV=production node server/db/setup_demand.js && NODE_ENV=production node server/index.js"
   },
   "engines": {
     "node": ">=18.0.0"
