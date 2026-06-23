@@ -19,6 +19,7 @@ import NPIForecasting from './pages/NPIForecasting';
 import ForecastingReport from './pages/ForecastingReport';
 import AdminConsole from './pages/AdminConsole';
 import SupplyPlanning from './pages/SupplyPlanning';
+import DemandPlanning from './pages/DemandPlanning';
 
 // ── Route protection ───────────────────────────────────────────────────────
 // Unchanged from original — same role checks, same redirect logic.
@@ -62,7 +63,8 @@ function AppRoutes() {
       <Route path="/npi"           element={<ProtectedRoute allowedRoles={['demand_planning']}><NPIForecasting /></ProtectedRoute>} />
       <Route path="/report"        element={<ProtectedRoute><ForecastingReport /></ProtectedRoute>} />
       <Route path="/admin"         element={<ProtectedRoute allowedRoles={['admin']}><AdminConsole /></ProtectedRoute>} />
-      <Route path="/supply"        element={<ProtectedRoute allowedRoles={['demand_planning']}><SupplyPlanning /></ProtectedRoute>} />
+      <Route path="/supply"            element={<ProtectedRoute allowedRoles={['demand_planning']}><SupplyPlanning /></ProtectedRoute>} />
+      <Route path="/demand-planning"   element={<ProtectedRoute allowedRoles={['demand_planning']}><DemandPlanning /></ProtectedRoute>} />
       <Route path="*"              element={<Navigate to="/" replace />} />
     </Routes>
   );

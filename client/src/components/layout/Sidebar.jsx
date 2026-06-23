@@ -50,7 +50,7 @@ const NAV_GROUPS = [
     group: 'Plan',
     roles: ['demand_planning'],
     items: [
-      { label: 'Demand Planning',         path: '/workbench',      icon: BarChart2,   roles: ['demand_planning'] },
+      { label: 'Demand Planning',          path: '/demand-planning', icon: BarChart2,   roles: ['demand_planning'] },
       { label: 'Scenarios',               path: '/scenarios',      icon: GitBranch,   roles: ['demand_planning'] },
       { label: 'Demand Sensing',          path: '/demand-sensing', icon: Zap,         roles: ['demand_planning'] },
       { label: 'NPI Forecasting',         path: '/npi',            icon: Plus,        roles: ['demand_planning'] },
