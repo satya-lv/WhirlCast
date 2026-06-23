@@ -799,6 +799,11 @@ router.get('/recommendations', (req, res) => {
           before: { utilizationPct: +(ci.total_req_hrs / ci.line_cap_hrs * 100).toFixed(1), shortageQty: ci.total_shortage, serviceLevelPct: +svcBefore.toFixed(1) },
           after:  { utilizationPct: +((ci.total_req_hrs - extraHrs) / ci.line_cap_hrs * 100).toFixed(1), shortageQty: newShortage, serviceLevelPct: +svcAfter.toFixed(1) },
         },
+        actionParams: {
+          actionType: 'add_overtime',
+          weekNumber: ci.week_number,
+          params: { plantId: ci.plant_id, lineId: ci.production_line_id, extraHoursPerWeek: extraHrs },
+        },
       });
     }
 
@@ -817,8 +822,8 @@ router.get('/recommendations', (req, res) => {
 
     for (const mi of matIssues) {
       const tightComp = db.prepare(`
-        SELECT c.name AS comp_name, c.code, c.on_hand_qty, c.unit_cost,
-          s.name AS supplier_name, s.lead_time_days, bl.qty_per
+        SELECT c.component_id, c.name AS comp_name, c.code, c.on_hand_qty, c.unit_cost,
+          s.supplier_id, s.name AS supplier_name, s.lead_time_days, bl.qty_per
         FROM bom_lines bl
         JOIN components c ON bl.component_id=c.component_id
         JOIN suppliers s ON c.supplier_id=s.supplier_id
@@ -849,6 +854,15 @@ router.get('/recommendations', (req, res) => {
           before: { coverageDays: +mi.material_availability.toFixed(1), shortageQty: +mi.shortage_qty.toFixed(1), serviceLevelPct: +svcBefore.toFixed(1) },
           after:  { coverageDays: +(mi.material_availability + 14).toFixed(1), shortageQty: +Math.max(0, mi.shortage_qty - recoverUnits).toFixed(1), serviceLevelPct: +svcAfter.toFixed(1), expediteCostINR: Math.round(costImpact) },
         },
+        actionParams: {
+          actionType: 'expedite_supplier',
+          params: {
+            componentId: tightComp.component_id,
+            supplierId:  tightComp.supplier_id,
+            qty:         expediteQty,
+            newWeekDue:  Math.max(1, mi.week_number - 2),
+          },
+        },
       });
     }
 
@@ -878,7 +892,7 @@ router.get('/recommendations', (req, res) => {
       if (!futureRow) continue;
       const hpu = HPU[ii.sku] || 0.4;
       const spareCapHrs = Math.max(0, futureRow.capacity_available * hpu - futureRow.capacity_required);
-      const pullableQty = Math.round(Math.min(ii.shortage_qty, spareCapHrs / hpu));
+      const pullableQty = Math.floor(Math.min(ii.shortage_qty, spareCapHrs / hpu, futureRow.planned_production));
       if (pullableQty < 5) continue;
 
       const revenueRecovered = Math.round(pullableQty * ii.price);
@@ -895,6 +909,13 @@ router.get('/recommendations', (req, res) => {
         impact: {
           before: { shortageQty: +ii.shortage_qty.toFixed(1), revenueAtRisk: Math.round(ii.revenue_at_risk) },
           after:  { shortageQty: +Math.max(0, ii.shortage_qty - pullableQty).toFixed(1), revenueAtRisk: Math.round(ii.revenue_at_risk - revenueRecovered), revenueRecoveredINR: revenueRecovered },
+        },
+        actionParams: {
+          actionType: 'pull_ahead',
+          sku:        ii.sku,
+          locationId: ii.location_id,
+          weekNumber: ii.week_number,
+          params: { fromWeek: futureWeek, toWeek: ii.week_number, qty: pullableQty },
         },
       });
     }
@@ -1044,6 +1065,45 @@ router.get('/scenarios/compare', (req, res) => {
 
     db.close();
     res.json({ weekRange: { start, end }, scenarioIds: rawIds, comparison: rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── DELETE /api/supply/scenarios/:id ──────────────────────────────────────
+// Permanently delete a non-baseline scenario and all its planning orders.
+
+router.delete('/scenarios/:id', (req, res) => {
+  try {
+    const db = getDb();
+    const scenarioId = parseInt(req.params.id);
+    if (!scenarioId) return res.status(400).json({ error: 'Invalid scenario id' });
+
+    const scenario = db.prepare(`SELECT * FROM scenario_supply_plans WHERE scenario_id=?`).get(scenarioId);
+    if (!scenario) return res.status(404).json({ error: 'Scenario not found' });
+    if (scenario.action_type === 'BASELINE') return res.status(403).json({ error: 'Cannot delete the Baseline Plan' });
+
+    db.transaction(() => {
+      db.prepare(`DELETE FROM planning_orders WHERE scenario_id=?`).run(scenarioId);
+      db.prepare(`DELETE FROM scenario_supply_plans WHERE scenario_id=?`).run(scenarioId);
+    })();
+
+    db.close();
+    res.json({ success: true, deletedScenarioId: scenarioId, name: scenario.name });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/supply/reset ─────────────────────────────────────────────────
+// Wipe all supply planning data and re-run the original seed script.
+// This restores the Baseline to its original state and deletes all other scenarios.
+
+router.post('/reset', (req, res) => {
+  try {
+    const seedSupply = require('../db/seed_supply');
+    seedSupply();
+    res.json({ success: true, message: 'Supply planning data reset to original seed state' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

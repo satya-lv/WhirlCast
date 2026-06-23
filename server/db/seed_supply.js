@@ -535,4 +535,5 @@ function seedSupply() {
     console.log(`  ${c.code.padEnd(16)} ${String(computedOnHand[c.code]).padStart(8)}  quarterly_PO: ${quarterlyReceipt[c.code]}`);
 }
 
-seedSupply();
+if (require.main === module) seedSupply();
+module.exports = seedSupply;

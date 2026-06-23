@@ -51,9 +51,10 @@ export const MEASURE_GROUPS = {
     accentColor: 'var(--green)',
     bgLight: '#F0FDF4',
     measures: [
-      { key: 'beginningInventory', label: 'Beg Inv',       fmt: 'int' },
-      { key: 'plannedProduction',  label: 'Pln Production', fmt: 'int', editable: true },
-      { key: 'endingInventory',    label: 'End Inv',        fmt: 'int' },
+      { key: 'forecastDemand',     label: 'Demand',     fmt: 'int' },
+      { key: 'beginningInventory', label: 'Inventory',  fmt: 'int' },
+      { key: 'plannedProduction',  label: 'Production', fmt: 'int', editable: true },
+      { key: 'shortageQty',        label: 'Gap',        fmt: 'int' },
     ],
   },
   constraints: {

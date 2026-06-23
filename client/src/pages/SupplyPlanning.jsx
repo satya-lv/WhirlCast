@@ -13,7 +13,7 @@ import React, {
 import {
   Layers, RefreshCw, AlertTriangle, ChevronDown, ChevronRight, Zap,
   BarChart2, GitBranch, Activity, Inbox as InboxIcon,
-  Sliders, Plus, Trophy, ArrowRight,
+  Sliders, Plus, Trophy, ArrowRight, Trash2, CheckCircle,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer,
@@ -201,7 +201,7 @@ function MeasureGroupTabs({ value, onChange, showActions, onToggleActions }) {
       background: 'var(--card)', borderBottom: '1px solid var(--border)', flexShrink: 0,
     }}>
       <span style={{ fontSize: 11, color: 'var(--text-3)', marginRight: 4 }}>Measure group:</span>
-      {Object.entries(MEASURE_GROUPS).map(([key, grp]) => {
+      {Object.entries(MEASURE_GROUPS).filter(([key]) => key !== 'demand').map(([key, grp]) => {
         const active = value === key;
         return (
           <button key={key} onClick={() => onChange(key)} style={{
@@ -624,12 +624,13 @@ export default function SupplyPlanning() {
   const [error,      setError]      = useState(null);
   const [kpis,       setKpis]       = useState(null);
   const [kpiLoading, setKpiLoading] = useState(false);
-  const [measureGroup, setMeasureGroup] = useState('demand');
+  const [measureGroup, setMeasureGroup] = useState('supply');
   const [showActions,  setShowActions]  = useState(false);
   const [mainView,     setMainView]     = useState('grid');
   const [recommendations, setRecommendations] = useState(null);
   const [recsLoading,     setRecsLoading]     = useState(false);
   const [recsKey,         setRecsKey]         = useState(0);
+  const [constraintsKey,  setConstraintsKey]  = useState(0);
 
   const gridContainerRef = useRef();
   const [gridDims, setGridDims] = useState({ height: 500, width: 900 });
@@ -749,6 +750,7 @@ export default function SupplyPlanning() {
       );
       refreshAll();
       setRecsKey(k => k + 1);
+      setConstraintsKey(k => k + 1);
     } catch (err) {
       showToast?.(`Edit failed: ${err.message}`, 'error');
     }
@@ -761,6 +763,7 @@ export default function SupplyPlanning() {
     );
     refreshAll();
     setRecsKey(k => k + 1);
+    setConstraintsKey(k => k + 1);
   }, [showToast, refreshAll]);
 
   const handleSwitchScenario = useCallback((scenarioId) => {
@@ -848,7 +851,7 @@ export default function SupplyPlanning() {
 
       {/* §3.6 Constraint Dashboard */}
       {mainView === 'constraints' && (
-        <ConstraintDashboard filters={filters} />
+        <ConstraintDashboard filters={filters} refreshKey={constraintsKey} />
       )}
 
       {/* §3.7 Pegging View */}
@@ -858,7 +861,12 @@ export default function SupplyPlanning() {
 
       {/* §3.9 Recommendation Engine */}
       {mainView === 'recommendations' && (
-        <RecommendationEngine recommendations={recommendations} loading={recsLoading} />
+        <RecommendationEngine
+          recommendations={recommendations}
+          loading={recsLoading}
+          scenarioId={filters.scenarioId}
+          onApply={() => { refreshAll(); setRecsKey(k => k + 1); setConstraintsKey(k => k + 1); }}
+        />
       )}
 
       {/* §4 Planner Exception Inbox */}
@@ -1067,7 +1075,7 @@ function DemandImpactView({ rows = [], summary }) {
   );
 }
 
-function ConstraintDashboard({ filters }) {
+function ConstraintDashboard({ filters, refreshKey }) {
   const [view, setView] = useState('capacity');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -1088,7 +1096,7 @@ function ConstraintDashboard({ filters }) {
       .then(setData)
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [view, filters]);
+  }, [view, filters, refreshKey]);
 
   const subTabs = [
     { id: 'capacity',      label: 'Capacity' },
@@ -1374,10 +1382,37 @@ function buildImpactChartData(rec) {
   return rows;
 }
 
-function RecCard({ rec }) {
+function RecCard({ rec, scenarioId, onApply }) {
+  const [applyState, setApplyState] = useState('idle');
   const chartData     = buildImpactChartData(rec);
   const priorityColor = rec.priority === 'HIGH' ? 'var(--danger)' : 'var(--amber)';
   const typeColor     = rec.type === 'CAPACITY' ? 'var(--navy-accent)' : rec.type === 'MATERIAL' ? '#7C3AED' : 'var(--green)';
+
+  const handleApply = async () => {
+    if (!rec.actionParams || applyState !== 'idle') return;
+    setApplyState('loading');
+    try {
+      const body = {
+        actionType:  rec.actionParams.actionType,
+        sku:         rec.actionParams.sku,
+        locationId:  rec.actionParams.locationId,
+        weekNumber:  rec.actionParams.weekNumber,
+        scenarioId,
+        params:      rec.actionParams.params,
+      };
+      const r = await fetch('/api/supply/actions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) { const d = await r.json(); throw new Error(d.error || 'Apply failed'); }
+      setApplyState('done');
+      setTimeout(() => onApply?.(), 1200);
+    } catch (err) {
+      setApplyState('idle');
+      alert(`Apply failed: ${err.message}`);
+    }
+  };
 
   return (
     <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px', marginBottom: 12, borderLeft: `3px solid ${priorityColor}` }}>
@@ -1405,6 +1440,18 @@ function RecCard({ rec }) {
               <span style={{ fontSize: 12, color: 'var(--text-1)', lineHeight: 1.45 }}>{action}</span>
             </div>
           ))}
+          {rec.actionParams && (
+            <button onClick={handleApply} disabled={applyState !== 'idle'} style={{
+              marginTop: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+              padding: '6px 14px', borderRadius: 7, border: 'none', fontSize: 11, fontWeight: 700, cursor: applyState === 'idle' ? 'pointer' : 'default',
+              background: applyState === 'done' ? 'var(--green)' : applyState === 'loading' ? '#E5E7EB' : 'var(--navy-accent)',
+              color: applyState === 'loading' ? 'var(--text-3)' : 'white',
+              transition: 'all 0.2s',
+            }}>
+              {applyState === 'done' && <CheckCircle size={12} />}
+              {applyState === 'done' ? 'Applied ✓' : applyState === 'loading' ? 'Applying…' : 'Apply Action →'}
+            </button>
+          )}
         </div>
 
         <div>
@@ -1439,7 +1486,7 @@ function RecCard({ rec }) {
   );
 }
 
-function RecommendationEngine({ recommendations, loading }) {
+function RecommendationEngine({ recommendations, loading, scenarioId, onApply }) {
   if (loading) {
     return (
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-3)', fontSize: 13 }}>
@@ -1470,7 +1517,7 @@ function RecommendationEngine({ recommendations, loading }) {
         {med  > 0 && <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: 'rgba(245,158,11,0.12)', color: 'var(--amber)' }}>{med} MEDIUM</span>}
         <span style={{ fontSize: 11, color: 'var(--text-3)' }}>W{recommendations.weekRange?.start}–W{recommendations.weekRange?.end} · Scenario {recommendations.scenarioId}</span>
       </div>
-      {recs.map(rec => <RecCard key={rec.id} rec={rec} />)}
+      {recs.map(rec => <RecCard key={rec.id} rec={rec} scenarioId={scenarioId} onApply={onApply} />)}
     </div>
   );
 }
@@ -1615,8 +1662,12 @@ function ScenarioSimulation({ filters, onSwitchScenario }) {
   const [showCreate, setShowCreate] = useState(false);
   const [creating,   setCreating]   = useState(false);
   const [form,       setForm]       = useState({ name: '', actionType: 'ADD_OVERTIME', description: '' });
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [createdId,  setCreatedId]  = useState(null);
+  const [refreshKey,     setRefreshKey]     = useState(0);
+  const [createdId,      setCreatedId]      = useState(null);
+  const [confirmDelete,  setConfirmDelete]  = useState(null);
+  const [deleting,       setDeleting]       = useState(false);
+  const [resetting,      setResetting]      = useState(false);
+  const [confirmReset,   setConfirmReset]   = useState(false);
 
   useEffect(() => {
     setSceLoading(true);
@@ -1666,6 +1717,40 @@ function ScenarioSimulation({ filters, onSwitchScenario }) {
       }
     } catch {}
     finally { setCreating(false); }
+  };
+
+  const handleDelete = async () => {
+    if (!confirmDelete) return;
+    setDeleting(true);
+    try {
+      const r = await fetch(`/api/supply/scenarios/${confirmDelete.scenario_id}`, { method: 'DELETE' });
+      if (!r.ok) { const d = await r.json(); throw new Error(d.error || 'Delete failed'); }
+      setConfirmDelete(null);
+      setSelected(prev => prev.filter(id => id !== confirmDelete.scenario_id));
+      setRefreshKey(k => k + 1);
+    } catch (err) {
+      alert(err.message);
+    } finally { setDeleting(false); }
+  };
+
+  const handleReset = async () => {
+    setResetting(true);
+    try {
+      const r = await fetch('/api/supply/reset', { method: 'POST' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      setConfirmReset(false);
+      setSelected([]);
+      setComparison(null);
+      setCreatedId(null);
+      // Fetch new baseline ID and switch to it
+      const scR = await fetch(`/api/supply/scenarios?weekStart=${filters.weekStart}&weekEnd=${filters.weekEnd}`);
+      const scD = await scR.json();
+      const baseline = (scD.scenarios || []).find(s => s.action_type === 'BASELINE');
+      if (baseline) onSwitchScenario(baseline.scenario_id);
+      setRefreshKey(k => k + 1);
+    } catch (err) {
+      alert(`Reset failed: ${err.message}`);
+    } finally { setResetting(false); }
   };
 
   const compareRows  = comparison?.comparison || [];
@@ -1767,14 +1852,41 @@ function ScenarioSimulation({ filters, onSwitchScenario }) {
                       <span>SL: <strong style={{ color: 'var(--text-2)' }}>{sc.service_level_pct?.toFixed(1) ?? '—'}%</strong></span>
                       <span>Gap: <strong style={{ color: 'var(--text-2)' }}>{sc.total_shortage?.toLocaleString('en-IN') ?? '—'}</strong></span>
                     </div>
-                    {isNew && (
+                    {sc.action_type !== 'BASELINE' && (
                       <button onClick={e => { e.stopPropagation(); onSwitchScenario(sc.scenario_id); }} style={{
                         marginTop: 7, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
-                        background: 'var(--amber)', color: 'white', border: 'none',
+                        background: isNew ? 'var(--amber)' : 'var(--navy-accent)', color: 'white', border: 'none',
                         borderRadius: 6, padding: '4px 0', fontSize: 10, fontWeight: 700, cursor: 'pointer', width: '100%',
                       }}>
                         <ArrowRight size={10} /> Activate in Grid →
                       </button>
+                    )}
+                    {sc.action_type !== 'BASELINE' && (
+                      confirmDelete?.scenario_id === sc.scenario_id ? (
+                        <div style={{ marginTop: 6, background: 'rgba(227,24,55,0.06)', border: '1px solid rgba(227,24,55,0.2)', borderRadius: 6, padding: '7px 8px' }}>
+                          <div style={{ fontSize: 10, color: 'var(--danger)', marginBottom: 5, fontWeight: 600, lineHeight: 1.4 }}>
+                            Delete "{sc.name}"? This cannot be undone.
+                          </div>
+                          <div style={{ display: 'flex', gap: 5 }}>
+                            <button onClick={e => { e.stopPropagation(); setConfirmDelete(null); }} style={{
+                              flex: 1, padding: '4px', borderRadius: 5, border: '1px solid var(--border)',
+                              background: 'var(--bg)', cursor: 'pointer', fontSize: 10, color: 'var(--text-2)',
+                            }}>Cancel</button>
+                            <button onClick={e => { e.stopPropagation(); handleDelete(); }} disabled={deleting} style={{
+                              flex: 1, padding: '4px', borderRadius: 5, border: 'none',
+                              background: 'var(--danger)', color: 'white', cursor: 'pointer', fontSize: 10, fontWeight: 700,
+                            }}>{deleting ? 'Deleting…' : 'Delete'}</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button onClick={e => { e.stopPropagation(); setConfirmDelete(sc); }} style={{
+                          marginTop: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                          background: 'transparent', color: 'var(--text-3)', border: '1px solid var(--border)',
+                          borderRadius: 5, padding: '3px 0', fontSize: 9, cursor: 'pointer', width: '100%',
+                        }}>
+                          <Trash2 size={9} /> Delete scenario
+                        </button>
+                      )
                     )}
                   </div>
                 </div>
@@ -1800,6 +1912,34 @@ function ScenarioSimulation({ filters, onSwitchScenario }) {
           </button>
           <div style={{ textAlign: 'center', fontSize: 10, color: 'var(--text-3)', marginTop: 5 }}>
             Select up to 5 (min 2)
+          </div>
+          <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px dashed var(--border)' }}>
+            {confirmReset ? (
+              <div style={{ background: 'rgba(227,24,55,0.06)', border: '1px solid rgba(227,24,55,0.2)', borderRadius: 8, padding: '10px 10px' }}>
+                <div style={{ fontSize: 10, color: 'var(--danger)', fontWeight: 700, marginBottom: 4 }}>Reset all supply data?</div>
+                <div style={{ fontSize: 9, color: 'var(--text-3)', marginBottom: 8, lineHeight: 1.5 }}>
+                  Permanently erases all scenarios and grid edits. Restores original seed data.
+                </div>
+                <div style={{ display: 'flex', gap: 5 }}>
+                  <button onClick={() => setConfirmReset(false)} style={{
+                    flex: 1, padding: '5px', borderRadius: 6, border: '1px solid var(--border)',
+                    background: 'var(--bg)', cursor: 'pointer', fontSize: 10, color: 'var(--text-2)',
+                  }}>Cancel</button>
+                  <button onClick={handleReset} disabled={resetting} style={{
+                    flex: 1, padding: '5px', borderRadius: 6, border: 'none',
+                    background: 'var(--danger)', color: 'white', cursor: 'pointer', fontSize: 10, fontWeight: 700,
+                  }}>{resetting ? 'Resetting…' : 'Reset'}</button>
+                </div>
+              </div>
+            ) : (
+              <button onClick={() => setConfirmReset(true)} style={{
+                width: '100%', padding: '6px', borderRadius: 7, border: '1px dashed rgba(227,24,55,0.4)',
+                background: 'transparent', cursor: 'pointer', fontSize: 10, color: 'var(--danger)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+              }}>
+                <RefreshCw size={10} /> Reset Supply Data
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -2033,6 +2173,10 @@ function ScenarioSimulation({ filters, onSwitchScenario }) {
 
 // ── View tabs (main workbench sections) ──────────────────────────────────────
 
+// HIDDEN_TABS: pegging and scenarios are fully functional but not shown in the nav.
+// To re-enable, remove their IDs from this set.
+const HIDDEN_TABS = new Set(['pegging', 'scenarios']);
+
 function ViewTabs({ active, onChange, recCount }) {
   const tabs = [
     { id: 'grid',            label: 'Planning Grid',    icon: Layers },
@@ -2041,7 +2185,7 @@ function ViewTabs({ active, onChange, recCount }) {
     { id: 'recommendations', label: 'Recommendations',  icon: BarChart2,  badge: recCount },
     { id: 'inbox',           label: 'Inbox',            icon: InboxIcon,  badge: recCount },
     { id: 'scenarios',       label: 'Scenarios',        icon: Sliders },
-  ];
+  ].filter(t => !HIDDEN_TABS.has(t.id));
   return (
     <div style={{ display: 'flex', gap: 2, padding: '6px 16px', background: 'var(--card)', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
       {tabs.map(tab => {
