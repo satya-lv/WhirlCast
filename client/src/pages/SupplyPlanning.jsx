@@ -12,7 +12,11 @@ import React, {
 } from 'react';
 import {
   Layers, RefreshCw, AlertTriangle, ChevronDown, ChevronRight, Zap,
+  BarChart2, GitBranch, Activity, Inbox as InboxIcon,
 } from 'lucide-react';
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer,
+} from 'recharts';
 import PlanningGrid, { MEASURE_GROUPS } from '../components/supply/PlanningGrid';
 import { ActionButton, simulatedAction } from '../components/shared/ActionButton';
 import { useToast } from '../context/ToastContext';
@@ -621,6 +625,10 @@ export default function SupplyPlanning() {
   const [kpiLoading, setKpiLoading] = useState(false);
   const [measureGroup, setMeasureGroup] = useState('demand');
   const [showActions,  setShowActions]  = useState(false);
+  const [mainView,     setMainView]     = useState('grid');
+  const [recommendations, setRecommendations] = useState(null);
+  const [recsLoading,     setRecsLoading]     = useState(false);
+  const [recsKey,         setRecsKey]         = useState(0);
 
   const gridContainerRef = useRef();
   const [gridDims, setGridDims] = useState({ height: 500, width: 900 });
@@ -690,6 +698,23 @@ export default function SupplyPlanning() {
     return () => { cancelled = true; clearTimeout(timer); };
   }, [filters]);
 
+  // Fetch recommendations (also triggered by recsKey after any data-changing action)
+  useEffect(() => {
+    let cancelled = false;
+    setRecsLoading(true);
+    const params = new URLSearchParams({
+      scenarioId: filters.scenarioId,
+      weekStart:  filters.weekStart,
+      weekEnd:    filters.weekEnd,
+    });
+    fetch(`/api/supply/recommendations?${params}`)
+      .then(r => { if (!r.ok) throw new Error('recs'); return r.json(); })
+      .then(data => { if (!cancelled) setRecommendations(data); })
+      .catch(()  => { if (!cancelled) setRecommendations(null); })
+      .finally(() => { if (!cancelled) setRecsLoading(false); });
+    return () => { cancelled = true; };
+  }, [filters, recsKey]);
+
   const refreshAll = useCallback(() => {
     setLoading(true); setKpiLoading(true);
     Promise.all([fetchAllGridPages(filters), fetchKPIs(filters)])
@@ -722,6 +747,7 @@ export default function SupplyPlanning() {
         'success',
       );
       refreshAll();
+      setRecsKey(k => k + 1);
     } catch (err) {
       showToast?.(`Edit failed: ${err.message}`, 'error');
     }
@@ -733,6 +759,7 @@ export default function SupplyPlanning() {
       'success',
     );
     refreshAll();
+    setRecsKey(k => k + 1);
   }, [showToast, refreshAll]);
 
   return (
@@ -773,47 +800,791 @@ export default function SupplyPlanning() {
       {/* §3.2 KPI strip */}
       <SupplyKPIStrip kpis={kpis} loading={kpiLoading} />
 
-      {/* Measure tabs + Actions toggle */}
-      <MeasureGroupTabs
-        value={measureGroup} onChange={setMeasureGroup}
-        showActions={showActions} onToggleActions={() => setShowActions(v => !v)}
+      {/* Main view tabs */}
+      <ViewTabs
+        active={mainView}
+        onChange={setMainView}
+        recCount={recommendations?.recommendations?.length ?? 0}
       />
 
-      {/* Error banner */}
-      {error && (
-        <div style={{
-          padding: '8px 16px', background: 'var(--danger-bg)',
-          borderBottom: '1px solid var(--danger)', fontSize: 12,
-          color: 'var(--danger)', flexShrink: 0,
-        }}>
-          Error loading data: {error}
-        </div>
+      {/* §3.3 Grid view + §3.4 Actions panel */}
+      {mainView === 'grid' && (
+        <>
+          <MeasureGroupTabs
+            value={measureGroup} onChange={setMeasureGroup}
+            showActions={showActions} onToggleActions={() => setShowActions(v => !v)}
+          />
+          {error && (
+            <div style={{ padding: '8px 16px', background: 'var(--danger-bg)', borderBottom: '1px solid var(--danger)', fontSize: 12, color: 'var(--danger)', flexShrink: 0 }}>
+              Error loading data: {error}
+            </div>
+          )}
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', overflow: 'hidden' }}>
+            <div ref={gridContainerRef} style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+              <PlanningGrid
+                rows={rows} weeks={weeks} measureGroup={measureGroup}
+                loading={loading} height={gridDims.height} width={gridDims.width}
+                onCellEdit={handleCellEdit}
+              />
+            </div>
+            {showActions && (
+              <ActionsPanel
+                filterOptions={filterOptions}
+                actionsMeta={actionsMeta}
+                metaError={metaError}
+                filters={filters}
+                onActionComplete={handleActionComplete}
+              />
+            )}
+          </div>
+        </>
       )}
 
-      {/* §3.3 Grid + §3.4 Actions panel */}
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', overflow: 'hidden' }}>
-        <div ref={gridContainerRef} style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
-          <PlanningGrid
-            rows={rows} weeks={weeks} measureGroup={measureGroup}
-            loading={loading} height={gridDims.height} width={gridDims.width}
-            onCellEdit={handleCellEdit}
-          />
-        </div>
-        {showActions && (
-          <ActionsPanel
-            filterOptions={filterOptions}
-            actionsMeta={actionsMeta}
-            metaError={metaError}
-            filters={filters}
-            onActionComplete={handleActionComplete}
-          />
-        )}
-      </div>
+      {/* §3.6 Constraint Dashboard */}
+      {mainView === 'constraints' && (
+        <ConstraintDashboard filters={filters} />
+      )}
+
+      {/* §3.7 Pegging View */}
+      {mainView === 'pegging' && (
+        <PeggingView filters={filters} filterOptions={filterOptions} />
+      )}
+
+      {/* §3.9 Recommendation Engine */}
+      {mainView === 'recommendations' && (
+        <RecommendationEngine recommendations={recommendations} loading={recsLoading} />
+      )}
+
+      {/* §4 Planner Exception Inbox */}
+      {mainView === 'inbox' && (
+        <ExceptionInbox
+          filters={filters}
+          recommendations={recommendations}
+          onNavigate={setMainView}
+        />
+      )}
     </div>
   );
 }
 
 // ── Shared micro-styles ───────────────────────────────────────────────────────
+
+// ── §3.6 Constraint Dashboard ─────────────────────────────────────────────────
+
+function UtilBar({ pct, size = 'md' }) {
+  const danger  = pct >= 100;
+  const warning = pct >= 85;
+  const color   = danger ? 'var(--danger)' : warning ? 'var(--amber)' : 'var(--green)';
+  const h       = size === 'sm' ? 4 : 6;
+  return (
+    <div style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div style={{ flex: 1, height: h, borderRadius: 99, background: 'var(--border)', overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: `${Math.min(100, pct)}%`, background: color, borderRadius: 99 }} />
+      </div>
+      <span style={{ fontSize: 10, fontWeight: 700, color, width: 40, textAlign: 'right', flexShrink: 0 }}>{pct.toFixed(1)}%</span>
+    </div>
+  );
+}
+
+function CapacityView({ rows = [], weekRange }) {
+  return (
+    <div>
+      <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 12 }}>
+        Production line capacity vs. demand over W{weekRange?.start}–W{weekRange?.end}. Overloaded lines shown in red.
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr style={{ background: 'var(--bg)' }}>
+              {['Plant', 'Line', 'Category', 'Hrs/Wk (cap)', 'Hrs Required', 'Utilization', 'Overload Hrs', 'Shortage Units', 'Status'].map(h => (
+                <th key={h} style={{ padding: '6px 10px', textAlign: 'left', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.4px', color: 'var(--text-3)', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, i) => {
+              const overloaded = row.overload_hrs > 0;
+              return (
+                <tr key={i} style={{ borderBottom: '1px solid var(--border)', background: overloaded ? 'rgba(227,24,55,0.04)' : i % 2 === 0 ? 'transparent' : 'var(--bg)' }}>
+                  <td style={{ padding: '8px 10px', fontWeight: 600, color: 'var(--text-1)' }}>{row.plant_name}</td>
+                  <td style={{ padding: '8px 10px', color: 'var(--text-1)' }}>{row.line_name}</td>
+                  <td style={{ padding: '8px 10px' }}>
+                    <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 10, background: 'var(--blue-bg)', color: 'var(--navy-accent)', fontWeight: 600 }}>{row.line_category}</span>
+                  </td>
+                  <td style={{ padding: '8px 10px', color: 'var(--text-2)' }}>{(row.hours_per_week ?? 0).toFixed(1)} h</td>
+                  <td style={{ padding: '8px 10px', color: 'var(--text-2)' }}>{(row.total_hrs_required ?? 0).toFixed(1)} h</td>
+                  <td style={{ padding: '8px 10px', minWidth: 130 }}><UtilBar pct={row.utilization_pct ?? 0} /></td>
+                  <td style={{ padding: '8px 10px', color: overloaded ? 'var(--danger)' : 'var(--text-3)', fontWeight: overloaded ? 700 : 400 }}>
+                    {overloaded ? `+${(row.overload_hrs ?? 0).toFixed(1)} h` : '—'}
+                  </td>
+                  <td style={{ padding: '8px 10px', color: (row.total_shortage ?? 0) > 0 ? 'var(--danger)' : 'var(--text-3)', fontWeight: (row.total_shortage ?? 0) > 0 ? 700 : 400 }}>
+                    {(row.total_shortage ?? 0) > 0 ? Math.round(row.total_shortage).toLocaleString('en-IN') : '—'}
+                  </td>
+                  <td style={{ padding: '8px 10px' }}>
+                    <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, fontWeight: 700,
+                      background: overloaded ? 'rgba(227,24,55,0.12)' : 'rgba(34,197,94,0.12)',
+                      color: overloaded ? 'var(--danger)' : 'var(--green)' }}>
+                      {overloaded ? 'OVERLOADED' : 'OK'}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+            {rows.length === 0 && (
+              <tr><td colSpan={9} style={{ padding: 24, textAlign: 'center', color: 'var(--text-3)' }}>No capacity data for this selection.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function MaterialView({ rows = [], weekRange }) {
+  return (
+    <div>
+      <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 12 }}>
+        Component material coverage for W{weekRange?.start}–W{weekRange?.end}. Components below 14 days are flagged.
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr style={{ background: 'var(--bg)' }}>
+              {['Component', 'Code', 'Supplier', 'On Hand', 'Required', 'Coverage', 'Open POs', 'OTIF %', 'Status'].map(h => (
+                <th key={h} style={{ padding: '6px 10px', textAlign: 'left', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.4px', color: 'var(--text-3)', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, i) => {
+              const cvg = row.coverage_days ?? 0;
+              const cvgColor = cvg >= 14 ? 'var(--green)' : cvg >= 7 ? 'var(--amber)' : 'var(--danger)';
+              const isShort = cvg < 14;
+              return (
+                <tr key={i} style={{ borderBottom: '1px solid var(--border)', background: isShort ? (cvg < 7 ? 'rgba(227,24,55,0.04)' : 'rgba(245,158,11,0.04)') : i % 2 === 0 ? 'transparent' : 'var(--bg)' }}>
+                  <td style={{ padding: '8px 10px', fontWeight: 600, color: 'var(--text-1)' }}>{row.component_name}</td>
+                  <td style={{ padding: '8px 10px' }}>
+                    <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 6, background: 'var(--bg)', color: 'var(--text-2)', border: '1px solid var(--border)', fontFamily: 'monospace' }}>{row.code}</span>
+                  </td>
+                  <td style={{ padding: '8px 10px', color: 'var(--text-2)' }}>{row.supplier_name}</td>
+                  <td style={{ padding: '8px 10px', color: 'var(--text-2)' }}>{Math.round(row.on_hand_qty ?? 0).toLocaleString('en-IN')}</td>
+                  <td style={{ padding: '8px 10px', color: 'var(--text-2)' }}>{Math.round(row.total_required ?? 0).toLocaleString('en-IN')}</td>
+                  <td style={{ padding: '8px 10px', minWidth: 130 }}>
+                    <div style={{ fontWeight: 700, color: cvgColor, fontSize: 12, marginBottom: 3 }}>{cvg.toFixed(1)} d</div>
+                    <UtilBar pct={Math.min(100, (cvg / 30) * 100)} size="sm" />
+                  </td>
+                  <td style={{ padding: '8px 10px', color: (row.open_po_qty ?? 0) > 0 ? 'var(--navy-accent)' : 'var(--text-3)', fontWeight: (row.open_po_qty ?? 0) > 0 ? 700 : 400 }}>
+                    {(row.open_po_qty ?? 0) > 0 ? Math.round(row.open_po_qty).toLocaleString('en-IN') : '—'}
+                  </td>
+                  <td style={{ padding: '8px 10px', color: (row.otif_pct ?? 100) < 85 ? 'var(--amber)' : 'var(--text-2)' }}>
+                    {row.otif_pct ?? '—'}%
+                  </td>
+                  <td style={{ padding: '8px 10px' }}>
+                    <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, fontWeight: 700,
+                      background: cvg < 7 ? 'rgba(227,24,55,0.12)' : cvg < 14 ? 'rgba(245,158,11,0.12)' : 'rgba(34,197,94,0.12)',
+                      color: cvg < 7 ? 'var(--danger)' : cvg < 14 ? 'var(--amber)' : 'var(--green)' }}>
+                      {cvg < 7 ? 'CRITICAL' : cvg < 14 ? 'LOW' : 'OK'}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+            {rows.length === 0 && (
+              <tr><td colSpan={9} style={{ padding: 24, textAlign: 'center', color: 'var(--text-3)' }}>No material constraints for this selection.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function DemandImpactView({ rows = [], summary }) {
+  return (
+    <div>
+      {summary && (
+        <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+          {[
+            { label: 'Impacted Rows',    value: summary.impacted_rows },
+            { label: 'Impacted SKUs',    value: summary.impacted_skus },
+            { label: 'Impacted Locs',   value: summary.impacted_locations },
+            { label: 'Total Shortage',   value: Math.round(summary.total_shortage_units || 0).toLocaleString('en-IN') + ' u' },
+            { label: 'Revenue at Risk',  value: fmtINR(summary.total_revenue_at_risk) },
+          ].map(({ label, value }) => (
+            <div key={label} style={{ padding: '10px 14px', borderRadius: 10, background: 'var(--card)', border: '1px solid var(--border)', minWidth: 120 }}>
+              <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-3)', marginBottom: 4 }}>{label}</div>
+              <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--danger)' }}>{value}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr style={{ background: 'var(--bg)' }}>
+              {['SKU', 'Location', 'Wk', 'Forecast', 'Cust Orders', 'Shortage', 'Revenue at Risk', 'Tier-3 Impact', 'Tier-1/2 Impact'].map(h => (
+                <th key={h} style={{ padding: '6px 10px', textAlign: 'left', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.4px', color: 'var(--text-3)', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, i) => (
+              <tr key={i} style={{ borderBottom: '1px solid var(--border)', background: i % 2 === 0 ? 'transparent' : 'var(--bg)' }}>
+                <td style={{ padding: '8px 10px', fontWeight: 600, color: 'var(--text-1)', whiteSpace: 'nowrap' }}>{row.sku}</td>
+                <td style={{ padding: '8px 10px', color: 'var(--text-2)', whiteSpace: 'nowrap' }}>{row.location_name}</td>
+                <td style={{ padding: '8px 10px', color: 'var(--text-2)' }}>W{row.week_number}</td>
+                <td style={{ padding: '8px 10px', color: 'var(--text-2)' }}>{Math.round(row.forecast_demand ?? 0).toLocaleString('en-IN')}</td>
+                <td style={{ padding: '8px 10px', color: 'var(--text-2)' }}>{Math.round(row.customer_orders ?? 0).toLocaleString('en-IN')}</td>
+                <td style={{ padding: '8px 10px', color: 'var(--danger)', fontWeight: 700 }}>{Math.round(row.shortage_qty ?? 0).toLocaleString('en-IN')}</td>
+                <td style={{ padding: '8px 10px', color: 'var(--danger)', fontWeight: 700 }}>{fmtINR(row.revenue_at_risk)}</td>
+                <td style={{ padding: '8px 10px', color: 'var(--text-2)' }}>{Math.round(row.tier3_impact_units ?? 0)}</td>
+                <td style={{ padding: '8px 10px', color: (row.tier12_impact_units ?? 0) > 0 ? 'var(--danger)' : 'var(--text-2)', fontWeight: (row.tier12_impact_units ?? 0) > 0 ? 700 : 400 }}>
+                  {Math.round(row.tier12_impact_units ?? 0)}
+                </td>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr><td colSpan={9} style={{ padding: 24, textAlign: 'center', color: 'var(--text-3)' }}>No demand impact shortages for this selection.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function ConstraintDashboard({ filters }) {
+  const [view, setView] = useState('capacity');
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    setData(null);
+    const p = new URLSearchParams({
+      view,
+      scenarioId: filters.scenarioId,
+      weekStart:  filters.weekStart,
+      weekEnd:    filters.weekEnd,
+      ...(filters.region && { region: filters.region }),
+      ...(filters.plant  && { plant:  String(filters.plant) }),
+    });
+    fetch(`/api/supply/constraints?${p}`)
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then(setData)
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [view, filters]);
+
+  const subTabs = [
+    { id: 'capacity',      label: 'Capacity' },
+    { id: 'material',      label: 'Material' },
+    { id: 'demand_impact', label: 'Demand Impact' },
+  ];
+
+  return (
+    <div style={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ display: 'flex', gap: 0, padding: '0 16px', background: 'var(--card)', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+        {subTabs.map(t => (
+          <button key={t.id} onClick={() => setView(t.id)} style={{
+            padding: '8px 20px', fontSize: 12, fontWeight: view === t.id ? 700 : 500,
+            cursor: 'pointer', border: 'none',
+            borderBottom: view === t.id ? '2px solid var(--navy-accent)' : '2px solid transparent',
+            background: 'transparent', color: view === t.id ? 'var(--navy-accent)' : 'var(--text-2)',
+            transition: 'all 0.12s',
+          }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+        {loading && <div style={{ color: 'var(--text-3)', fontSize: 13, padding: 32, textAlign: 'center' }}>Loading…</div>}
+        {!loading && data && view === 'capacity'      && <CapacityView rows={data.rows} weekRange={data.weekRange} />}
+        {!loading && data && view === 'material'      && <MaterialView rows={data.rows} weekRange={data.weekRange} />}
+        {!loading && data && view === 'demand_impact' && <DemandImpactView rows={data.rows} summary={data.summary} />}
+      </div>
+    </div>
+  );
+}
+
+// ── §3.7 Pegging View ─────────────────────────────────────────────────────────
+
+function PeggingNode({ title, color, children, width = 192 }) {
+  return (
+    <div style={{ width, flexShrink: 0, background: 'var(--card)', border: `1.5px solid ${color}`, borderRadius: 10, padding: '10px 12px', boxShadow: '0 1px 4px rgba(0,0,0,0.07)' }}>
+      <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 4 }}>
+        <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, display: 'inline-block', flexShrink: 0 }} />
+        {title}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function PRow({ label, value, danger }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 4, alignItems: 'baseline' }}>
+      <span style={{ fontSize: 10, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>{label}</span>
+      <span style={{ fontSize: 11, fontWeight: 700, color: danger ? 'var(--danger)' : 'var(--text-1)', whiteSpace: 'nowrap' }}>{value}</span>
+    </div>
+  );
+}
+
+function PeggingArrow() {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0, padding: '0 6px', marginTop: 30 }}>
+      <svg width="28" height="14" viewBox="0 0 28 14" fill="none">
+        <line x1="2" y1="7" x2="22" y2="7" stroke="var(--text-3)" strokeWidth="1.5" strokeDasharray="3 2" />
+        <polyline points="17,3 25,7 17,11" fill="none" stroke="var(--text-3)" strokeWidth="1.5" strokeLinejoin="round" />
+      </svg>
+    </div>
+  );
+}
+
+function PeggingChain({ chain, cell }) {
+  const { customerDemand, planningOrder, firmProductionOrders, componentRequirements, supplierPurchaseOrders, transferOrders } = chain;
+  const navy = 'var(--navy-accent)';
+  const green = 'var(--green)';
+  const amber = 'var(--amber)';
+  const red   = 'var(--danger)';
+  const capUtilPct = planningOrder.capacityAvailable > 0
+    ? (planningOrder.capacityRequired / planningOrder.capacityAvailable) * 100
+    : 0;
+
+  return (
+    <div>
+      <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 12 }}>
+        {cell.sku} · {cell.locationName} · Week {cell.weekNumber}
+      </div>
+      <div style={{ overflowX: 'auto', paddingBottom: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', minWidth: 'max-content' }}>
+
+          {/* Node 1: Customer Demand */}
+          <PeggingNode title="Customer Demand" color={navy} width={188}>
+            <PRow label="Forecast Demand"    value={Math.round(customerDemand.totalDemand).toLocaleString('en-IN')} />
+            <PRow label="Customer Orders"    value={Math.round(customerDemand.customerOrders).toLocaleString('en-IN')} />
+            <PRow label="Priority Demand"    value={Math.round(customerDemand.priorityDemand).toLocaleString('en-IN')} />
+            <PRow label="Shortage Impact"
+              value={customerDemand.shortageImpact > 0 ? Math.round(customerDemand.shortageImpact).toLocaleString('en-IN') : '—'}
+              danger={customerDemand.shortageImpact > 0} />
+            <div style={{ marginTop: 6, fontSize: 10, color: 'var(--text-3)' }}>
+              T1: {customerDemand.tier1Customers} · T2: {customerDemand.tier2Customers} customers
+            </div>
+          </PeggingNode>
+
+          <PeggingArrow />
+
+          {/* Node 2: FG / Planning Order */}
+          <PeggingNode title="FG Inventory / Planning Order" color={planningOrder.shortageQty > 0 ? red : green} width={204}>
+            <PRow label="Beg. Inventory"     value={Math.round(planningOrder.beginningInventory).toLocaleString('en-IN')} />
+            <PRow label="Planned Production"  value={Math.round(planningOrder.plannedProduction).toLocaleString('en-IN')} />
+            <PRow label="Ending Inventory"    value={Math.round(planningOrder.endingInventory).toLocaleString('en-IN')} />
+            <PRow label="Shortage"
+              value={planningOrder.shortageQty > 0 ? Math.round(planningOrder.shortageQty).toLocaleString('en-IN') : '—'}
+              danger={planningOrder.shortageQty > 0} />
+            <PRow label="Supply Gap"
+              value={planningOrder.supplyGap > 0 ? Math.round(planningOrder.supplyGap).toLocaleString('en-IN') : '—'}
+              danger={planningOrder.supplyGap > 0} />
+            <div style={{ marginTop: 6, fontSize: 10, color: 'var(--text-3)' }}>
+              {planningOrder.plant} · {planningOrder.line}
+            </div>
+            <div style={{ marginTop: 4 }}>
+              <UtilBar pct={Math.min(200, capUtilPct)} size="sm" />
+              <span style={{ fontSize: 9, color: 'var(--text-3)' }}>Capacity utilization</span>
+            </div>
+          </PeggingNode>
+
+          <PeggingArrow />
+
+          {/* Node 3: Components */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.4px', color: 'var(--text-3)', marginBottom: 2 }}>
+              Component Requirements ({componentRequirements.length})
+            </div>
+            {componentRequirements.slice(0, 5).map(comp => (
+              <PeggingNode key={comp.code} title={comp.category} color={comp.coverageOk ? green : red} width={192}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-1)', marginBottom: 4 }}>{comp.name}</div>
+                <PRow label="Qty/unit"   value={comp.qtyPer} />
+                <PRow label="Required"   value={Math.round(comp.qtyRequired).toLocaleString('en-IN')} />
+                <PRow label="On Hand"    value={Math.round(comp.onHandQty).toLocaleString('en-IN')} />
+                <PRow label="After Draw" value={Math.round(comp.qtyAfterDraw).toLocaleString('en-IN')} danger={!comp.coverageOk} />
+                <div style={{ marginTop: 4, fontSize: 10, fontWeight: 700, color: comp.coverageOk ? green : red }}>
+                  {comp.coverageOk ? '✓ Covered' : '⚠ Insufficient'}
+                </div>
+              </PeggingNode>
+            ))}
+          </div>
+
+          <PeggingArrow />
+
+          {/* Node 4: Suppliers */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.4px', color: 'var(--text-3)', marginBottom: 2 }}>
+              Supplier Dependency
+            </div>
+            {componentRequirements.slice(0, 5).map(comp => {
+              const openPO = supplierPurchaseOrders.find(p => p.component === comp.name);
+              return (
+                <PeggingNode key={comp.code + '-s'} title="Supplier" color={comp.otifPct >= 85 ? green : amber} width={180}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-1)', marginBottom: 4 }}>{comp.supplier}</div>
+                  <PRow label="OTIF %"     value={`${comp.otifPct}%`}     danger={comp.otifPct < 85} />
+                  <PRow label="Lead Time"  value={`${comp.leadTimeDays}d`} />
+                  {openPO && (
+                    <div style={{ marginTop: 4, padding: '3px 7px', borderRadius: 6, background: 'var(--blue-bg)', fontSize: 10, color: 'var(--navy-accent)', fontWeight: 600 }}>
+                      Open PO: {Math.round(openPO.qty).toLocaleString('en-IN')} u · W{openPO.weekDue}
+                    </div>
+                  )}
+                </PeggingNode>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Firm Production Orders */}
+      {firmProductionOrders.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)', marginBottom: 8 }}>Firm Production Orders ({firmProductionOrders.length})</div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {firmProductionOrders.map(fpo => (
+              <div key={fpo.fpoId} style={{ padding: '7px 12px', borderRadius: 8, background: 'var(--blue-bg)', border: '1px solid var(--blue)', fontSize: 11 }}>
+                <div style={{ fontWeight: 700, color: 'var(--navy-accent)' }}>{fpo.plant} · {fpo.line}</div>
+                <div style={{ color: 'var(--text-2)', marginTop: 2 }}>Qty: {Math.round(fpo.qty).toLocaleString('en-IN')} · {fpo.status}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Transfer Orders */}
+      {transferOrders.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)', marginBottom: 8 }}>Transfer Orders ({transferOrders.length})</div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {transferOrders.map(to => (
+              <div key={to.toId} style={{ padding: '7px 12px', borderRadius: 8, background: 'var(--card)', border: '1px solid var(--border)', fontSize: 11 }}>
+                <div style={{ fontWeight: 700, color: 'var(--text-1)' }}>{to.from} → {to.to}</div>
+                <div style={{ color: 'var(--text-2)', marginTop: 2 }}>Qty: {Math.round(to.qty).toLocaleString('en-IN')} · {to.status}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PeggingView({ filters, filterOptions }) {
+  const [query, setQuery] = useState({ sku: '', locationId: '', weekNumber: String(filters.weekStart || 22) });
+  const [data, setData]   = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [traceError, setTraceError] = useState(null);
+  const setQ = (k, v) => setQuery(p => ({ ...p, [k]: v }));
+
+  const runTrace = () => {
+    if (!query.sku || !query.locationId) return;
+    setLoading(true); setTraceError(null); setData(null);
+    const p = new URLSearchParams({
+      sku:        query.sku,
+      locationId: query.locationId,
+      weekNumber: query.weekNumber,
+      scenarioId: filters.scenarioId,
+    });
+    fetch(`/api/supply/pegging?${p}`)
+      .then(r => r.json().then(d => { if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`); return d; }))
+      .then(setData)
+      .catch(e => setTraceError(e.message))
+      .finally(() => setLoading(false));
+  };
+
+  const skuList = filterOptions?.skus      || [];
+  const locList = filterOptions?.locations  || [];
+
+  return (
+    <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 16 }}>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.4px', color: 'var(--text-3)', marginBottom: 4 }}>SKU</div>
+          <select value={query.sku} onChange={e => setQ('sku', e.target.value)} style={s.input}>
+            <option value="">Select SKU…</option>
+            {skuList.map(sk => <option key={sk.sku} value={sk.sku}>{sk.sku.replace(/_/g, ' ')}</option>)}
+          </select>
+        </div>
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.4px', color: 'var(--text-3)', marginBottom: 4 }}>Location</div>
+          <select value={query.locationId} onChange={e => setQ('locationId', e.target.value)} style={s.input}>
+            <option value="">Select location…</option>
+            {locList.map(l => <option key={l.location_id} value={l.location_id}>{l.name} ({l.region})</option>)}
+          </select>
+        </div>
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.4px', color: 'var(--text-3)', marginBottom: 4 }}>Week</div>
+          <input type="number" min={1} max={52} value={query.weekNumber} onChange={e => setQ('weekNumber', e.target.value)} style={{ ...s.input, width: 60 }} />
+        </div>
+        <button onClick={runTrace} disabled={!query.sku || !query.locationId || loading}
+          style={{ padding: '6px 20px', borderRadius: 8, fontSize: 12, fontWeight: 700,
+            cursor: !query.sku || !query.locationId ? 'not-allowed' : 'pointer',
+            border: 'none', background: 'var(--navy-accent)', color: 'white',
+            opacity: !query.sku || !query.locationId ? 0.5 : 1 }}>
+          {loading ? 'Tracing…' : '▶ Trace Chain'}
+        </button>
+      </div>
+
+      {traceError && (
+        <div style={{ padding: '10px 14px', borderRadius: 8, background: 'rgba(227,24,55,0.1)', color: 'var(--danger)', fontSize: 12, marginBottom: 12 }}>
+          {traceError}
+        </div>
+      )}
+
+      {!data && !loading && !traceError && (
+        <div style={{ textAlign: 'center', padding: 48, color: 'var(--text-3)', fontSize: 13 }}>
+          <GitBranch size={32} strokeWidth={1} style={{ marginBottom: 12, display: 'block', margin: '0 auto 12px' }} />
+          Select a SKU, Location, and Week, then click Trace Chain to see the end-to-end dependency chain.
+        </div>
+      )}
+
+      {data && <PeggingChain chain={data.chain} cell={data.cell} />}
+    </div>
+  );
+}
+
+// ── §3.9 Recommendation Engine ────────────────────────────────────────────────
+
+function buildImpactChartData(rec) {
+  const { before, after } = rec.impact;
+  const rows = [];
+  if (before.serviceLevelPct != null) rows.push({ metric: 'Service Level %', Before: +before.serviceLevelPct.toFixed(1), After: +after.serviceLevelPct.toFixed(1) });
+  if (before.shortageQty != null)     rows.push({ metric: 'Shortage Units',   Before: +before.shortageQty.toFixed(1),     After: +after.shortageQty.toFixed(1) });
+  if (before.utilizationPct != null)  rows.push({ metric: 'Utilization %',    Before: +before.utilizationPct.toFixed(1),  After: +after.utilizationPct.toFixed(1) });
+  if (before.coverageDays != null)    rows.push({ metric: 'Coverage Days',    Before: +before.coverageDays.toFixed(1),    After: +after.coverageDays.toFixed(1) });
+  return rows;
+}
+
+function RecCard({ rec }) {
+  const chartData     = buildImpactChartData(rec);
+  const priorityColor = rec.priority === 'HIGH' ? 'var(--danger)' : 'var(--amber)';
+  const typeColor     = rec.type === 'CAPACITY' ? 'var(--navy-accent)' : rec.type === 'MATERIAL' ? '#7C3AED' : 'var(--green)';
+
+  return (
+    <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px', marginBottom: 12, borderLeft: `3px solid ${priorityColor}` }}>
+      {/* Header */}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 10,
+          background: rec.priority === 'HIGH' ? 'rgba(227,24,55,0.12)' : 'rgba(245,158,11,0.12)', color: priorityColor }}>
+          {rec.priority}
+        </span>
+        <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: 'var(--blue-bg)', color: typeColor }}>
+          {rec.type}
+        </span>
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-1)', flex: 1, minWidth: 220 }}>{rec.issue}</span>
+      </div>
+
+      {/* Two columns: ranked actions + before/after chart */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start' }}>
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.4px', color: 'var(--text-3)', marginBottom: 8 }}>Recommended Actions</div>
+          {rec.recommendedActions.map((action, i) => (
+            <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'flex-start' }}>
+              <span style={{ width: 18, height: 18, borderRadius: '50%', background: 'var(--navy-accent)', color: 'white', fontSize: 10, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 }}>
+                {i + 1}
+              </span>
+              <span style={{ fontSize: 12, color: 'var(--text-1)', lineHeight: 1.45 }}>{action}</span>
+            </div>
+          ))}
+        </div>
+
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.4px', color: 'var(--text-3)', marginBottom: 8 }}>Before vs. After Impact</div>
+          <ResponsiveContainer width="100%" height={120}>
+            <BarChart data={chartData} margin={{ top: 4, right: 8, left: -16, bottom: 0 }} barGap={2} barSize={14}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+              <XAxis dataKey="metric" tick={{ fontSize: 9, fill: 'var(--text-3)' }} tickLine={false} axisLine={false} interval={0} />
+              <YAxis tick={{ fontSize: 9, fill: 'var(--text-3)' }} tickLine={false} axisLine={false} width={32} />
+              <Tooltip contentStyle={{ fontSize: 11, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8 }} labelStyle={{ fontWeight: 700, marginBottom: 4 }} />
+              <Bar dataKey="Before" fill="var(--navy-accent)" radius={[2, 2, 0, 0]} name="Before" />
+              <Bar dataKey="After"  fill="var(--green)"       radius={[2, 2, 0, 0]} name="After" />
+            </BarChart>
+          </ResponsiveContainer>
+          <div style={{ display: 'flex', gap: 16, marginTop: 4, fontSize: 10, fontWeight: 700, flexWrap: 'wrap' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ width: 10, height: 10, borderRadius: 2, background: 'var(--navy-accent)', display: 'inline-block' }} /> Before
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ width: 10, height: 10, borderRadius: 2, background: 'var(--green)', display: 'inline-block' }} /> After
+            </span>
+            {rec.impact.after.revenueRecoveredINR != null && (
+              <span style={{ color: 'var(--green)' }}>+{fmtINR(rec.impact.after.revenueRecoveredINR)} recovered</span>
+            )}
+            {rec.impact.after.expediteCostINR != null && (
+              <span style={{ color: 'var(--amber)' }}>{fmtINR(rec.impact.after.expediteCostINR)} expedite cost</span>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RecommendationEngine({ recommendations, loading }) {
+  if (loading) {
+    return (
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-3)', fontSize: 13 }}>
+        Computing recommendations…
+      </div>
+    );
+  }
+
+  const recs = recommendations?.recommendations || [];
+  if (recs.length === 0) {
+    return (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-3)', gap: 10, padding: 48 }}>
+        <Activity size={36} strokeWidth={1} />
+        <div style={{ fontSize: 14, fontWeight: 700 }}>No active constraints</div>
+        <div style={{ fontSize: 12 }}>All capacity and material constraints are within acceptable ranges for this period.</div>
+      </div>
+    );
+  }
+
+  const high = recs.filter(r => r.priority === 'HIGH').length;
+  const med  = recs.filter(r => r.priority === 'MEDIUM').length;
+
+  return (
+    <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 16 }}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)' }}>{recs.length} recommendations</span>
+        {high > 0 && <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: 'rgba(227,24,55,0.12)', color: 'var(--danger)' }}>{high} HIGH</span>}
+        {med  > 0 && <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: 'rgba(245,158,11,0.12)', color: 'var(--amber)' }}>{med} MEDIUM</span>}
+        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>W{recommendations.weekRange?.start}–W{recommendations.weekRange?.end} · Scenario {recommendations.scenarioId}</span>
+      </div>
+      {recs.map(rec => <RecCard key={rec.id} rec={rec} />)}
+    </div>
+  );
+}
+
+// ── §4 Planner Exception Inbox ─────────────────────────────────────────────────
+
+function InboxItem({ rec, onNavigate }) {
+  const priorityColor = rec.priority === 'HIGH' ? 'var(--danger)' : 'var(--amber)';
+  const typeIcon = rec.type === 'CAPACITY' ? '⚙' : rec.type === 'MATERIAL' ? '📦' : '📊';
+
+  return (
+    <div style={{ display: 'flex', gap: 12, padding: '12px 14px', borderRadius: 10, background: 'var(--card)', border: '1px solid var(--border)', marginBottom: 8, alignItems: 'flex-start', borderLeft: `3px solid ${priorityColor}` }}>
+      <span style={{ fontSize: 18, flexShrink: 0, marginTop: 1 }}>{typeIcon}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-1)', marginBottom: 4, lineHeight: 1.4 }}>{rec.issue}</div>
+        <div style={{ fontSize: 11, color: 'var(--text-2)', marginBottom: 8 }}>{rec.recommendedActions[0]}</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 8,
+            background: rec.priority === 'HIGH' ? 'rgba(227,24,55,0.12)' : 'rgba(245,158,11,0.12)', color: priorityColor }}>
+            {rec.priority}
+          </span>
+          <span style={{ fontSize: 10, padding: '1px 7px', borderRadius: 8, background: 'var(--bg)', color: 'var(--text-3)', border: '1px solid var(--border)' }}>
+            {rec.type}
+          </span>
+          {rec.impact.before.serviceLevelPct != null && (
+            <span style={{ fontSize: 10, color: 'var(--text-3)' }}>
+              SL: {rec.impact.before.serviceLevelPct.toFixed(1)}% → {rec.impact.after.serviceLevelPct.toFixed(1)}%
+            </span>
+          )}
+          {rec.impact.before.shortageQty != null && rec.impact.before.shortageQty > 0 && (
+            <span style={{ fontSize: 10, color: 'var(--text-3)' }}>
+              Shortage: {rec.impact.before.shortageQty.toFixed(0)} → {rec.impact.after.shortageQty.toFixed(0)} units
+            </span>
+          )}
+        </div>
+      </div>
+      <button onClick={() => onNavigate('recommendations')}
+        style={{ flexShrink: 0, padding: '5px 12px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--navy-accent)', whiteSpace: 'nowrap' }}>
+        View Fix →
+      </button>
+    </div>
+  );
+}
+
+function ExceptionInbox({ filters, recommendations, onNavigate }) {
+  const recs = recommendations?.recommendations || [];
+  const high = recs.filter(r => r.priority === 'HIGH');
+  const med  = recs.filter(r => r.priority === 'MEDIUM');
+
+  if (!recommendations) {
+    return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-3)', fontSize: 13 }}>Loading exceptions…</div>;
+  }
+
+  return (
+    <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 16 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)', marginBottom: 4 }}>Planner Exception Inbox</div>
+      <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 16 }}>
+        Active constraint issues needing attention · W{filters.weekStart}–W{filters.weekEnd} · Scenario {filters.scenarioId}
+      </div>
+
+      {recs.length === 0 && (
+        <div style={{ textAlign: 'center', padding: 48, color: 'var(--text-3)' }}>
+          <InboxIcon size={32} strokeWidth={1} style={{ display: 'block', margin: '0 auto 12px' }} />
+          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Inbox is clear</div>
+          <div style={{ fontSize: 12 }}>No active constraint issues for the current period.</div>
+        </div>
+      )}
+
+      {high.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px', color: 'var(--danger)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--danger)', display: 'inline-block' }} />
+            High Priority ({high.length})
+          </div>
+          {high.map(rec => <InboxItem key={rec.id} rec={rec} onNavigate={onNavigate} />)}
+        </div>
+      )}
+
+      {med.length > 0 && (
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px', color: 'var(--amber)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--amber)', display: 'inline-block' }} />
+            Medium Priority ({med.length})
+          </div>
+          {med.map(rec => <InboxItem key={rec.id} rec={rec} onNavigate={onNavigate} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── View tabs (main workbench sections) ──────────────────────────────────────
+
+function ViewTabs({ active, onChange, recCount }) {
+  const tabs = [
+    { id: 'grid',            label: 'Planning Grid',    icon: Layers },
+    { id: 'constraints',     label: 'Constraints',      icon: Activity },
+    { id: 'pegging',         label: 'Pegging',          icon: GitBranch },
+    { id: 'recommendations', label: 'Recommendations',  icon: BarChart2,  badge: recCount },
+    { id: 'inbox',           label: 'Inbox',            icon: InboxIcon,  badge: recCount },
+  ];
+  return (
+    <div style={{ display: 'flex', gap: 2, padding: '6px 16px', background: 'var(--card)', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+      {tabs.map(tab => {
+        const isActive = active === tab.id;
+        const Icon = tab.icon;
+        return (
+          <button key={tab.id} onClick={() => onChange(tab.id)} style={{
+            display: 'flex', alignItems: 'center', gap: 5,
+            padding: '5px 14px', borderRadius: 7, fontSize: 11,
+            fontWeight: isActive ? 700 : 500, cursor: 'pointer', border: 'none',
+            background: isActive ? 'var(--navy-accent)' : 'transparent',
+            color: isActive ? 'white' : 'var(--text-2)', transition: 'all 0.12s',
+          }}>
+            <Icon size={12} />
+            {tab.label}
+            {(tab.badge > 0) && (
+              <span style={{ fontSize: 9, fontWeight: 800, padding: '1px 5px', borderRadius: 8, marginLeft: 2,
+                background: isActive ? 'rgba(255,255,255,0.25)' : 'var(--danger)', color: 'white' }}>
+                {tab.badge}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 const s = {
   filterBar: {
