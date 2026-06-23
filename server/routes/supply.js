@@ -81,6 +81,7 @@ router.get('/actions-meta', (req, res) => {
     db.close();
     res.json({ lines, components, suppliers });
   } catch (err) {
+    console.error('=== SUPPLY ROUTE ERROR ===', err.message, '\nSTACK:', err.stack);
     res.status(500).json({ error: err.message });
   }
 });
@@ -107,6 +108,7 @@ router.get('/filters', (req, res) => {
       weekRange: { min: 1, max: 52, defaultStart: 22, defaultEnd: 34 },
     });
   } catch (err) {
+    console.error('=== SUPPLY ROUTE ERROR ===', err.message, '\nSTACK:', err.stack);
     res.status(500).json({ error: err.message });
   }
 });
@@ -209,6 +211,7 @@ router.get('/grid', (req, res) => {
       scenarioId,
     });
   } catch (err) {
+    console.error('=== SUPPLY ROUTE ERROR ===', err.message, '\nSTACK:', err.stack);
     res.status(500).json({ error: err.message });
   }
 });
@@ -290,6 +293,7 @@ router.get('/kpis', (req, res) => {
       },
     });
   } catch (err) {
+    console.error('=== SUPPLY ROUTE ERROR ===', err.message, '\nSTACK:', err.stack);
     res.status(500).json({ error: err.message });
   }
 });
@@ -420,6 +424,7 @@ router.get('/constraints', (req, res) => {
     db.close();
     res.status(400).json({ error: 'view must be capacity | material | demand_impact' });
   } catch (err) {
+    console.error('=== SUPPLY ROUTE ERROR ===', err.message, '\nSTACK:', err.stack);
     res.status(500).json({ error: err.message });
   }
 });
@@ -569,6 +574,7 @@ router.get('/pegging', (req, res) => {
       },
     });
   } catch (err) {
+    console.error('=== SUPPLY ROUTE ERROR ===', err.message, '\nSTACK:', err.stack);
     res.status(500).json({ error: err.message });
   }
 });
@@ -734,6 +740,7 @@ router.post('/actions', (req, res) => {
     db.close();
     res.json({ success: true, actionType, ...result });
   } catch (err) {
+    console.error('=== SUPPLY ROUTE ERROR ===', err.message, '\nSTACK:', err.stack);
     res.status(400).json({ error: err.message });
   }
 });
@@ -931,6 +938,7 @@ router.get('/recommendations', (req, res) => {
     db.close();
     res.json({ scenarioId, weekRange: { start, end }, count: recs.length, recommendations: recs });
   } catch (err) {
+    console.error('=== SUPPLY ROUTE ERROR ===', err.message, '\nSTACK:', err.stack);
     res.status(500).json({ error: err.message });
   }
 });
@@ -970,6 +978,7 @@ router.get('/scenarios', (req, res) => {
     db.close();
     res.json({ weekRange: { start, end }, scenarios });
   } catch (err) {
+    console.error('=== SUPPLY ROUTE ERROR ===', err.message, '\nSTACK:', err.stack);
     res.status(500).json({ error: err.message });
   }
 });
@@ -1019,6 +1028,7 @@ router.post('/scenarios', (req, res) => {
     db.close();
     res.json({ success: true, scenarioId: newId, name, clonedRowCount: rows });
   } catch (err) {
+    console.error('=== SUPPLY ROUTE ERROR ===', err.message, '\nSTACK:', err.stack);
     res.status(500).json({ error: err.message });
   }
 });
@@ -1066,6 +1076,7 @@ router.get('/scenarios/compare', (req, res) => {
     db.close();
     res.json({ weekRange: { start, end }, scenarioIds: rawIds, comparison: rows });
   } catch (err) {
+    console.error('=== SUPPLY ROUTE ERROR ===', err.message, '\nSTACK:', err.stack);
     res.status(500).json({ error: err.message });
   }
 });
@@ -1091,6 +1102,7 @@ router.delete('/scenarios/:id', (req, res) => {
     db.close();
     res.json({ success: true, deletedScenarioId: scenarioId, name: scenario.name });
   } catch (err) {
+    console.error('=== SUPPLY ROUTE ERROR ===', err.message, '\nSTACK:', err.stack);
     res.status(500).json({ error: err.message });
   }
 });
@@ -1105,6 +1117,7 @@ router.post('/reset', (req, res) => {
     seedSupply();
     res.json({ success: true, message: 'Supply planning data reset to original seed state' });
   } catch (err) {
+    console.error('=== SUPPLY ROUTE ERROR ===', err.message, '\nSTACK:', err.stack);
     res.status(500).json({ error: err.message });
   }
 });
