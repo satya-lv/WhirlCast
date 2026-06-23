@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(netstat -ano)",
+      "Bash(tasklist /FI \"PID eq 39476\" /FO LIST)",
+      "Bash(kill 39476)",
+      "Bash(node index.js)",
+      "Bash(taskkill //F //PID 39476)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('lines:', len\\(d['lines']\\), '| components:', len\\(d['components']\\), '| suppliers:', len\\(d['suppliers']\\)\\); print\\('comp[0]:', d['components'][0]\\); print\\('supp[0]:', d['suppliers'][0]\\)\")",
+      "Bash(node -e \"process.stdin.resume\\(\\); let d=''; process.stdin.on\\('data',c=>d+=c\\); process.stdin.on\\('end',\\(\\)=>{const j=JSON.parse\\(d\\); console.log\\('lines:',j.lines.length,'| components:',j.components.length,'| suppliers:',j.suppliers.length\\); console.log\\('comp[0]:',JSON.stringify\\(j.components[0]\\)\\); console.log\\('supp[0]:',JSON.stringify\\(j.suppliers[0]\\)\\);}\\);\")",
+      "Bash(node -e \"process.stdin.resume\\(\\); let d=''; process.stdin.on\\('data',c=>d+=c\\); process.stdin.on\\('end',\\(\\)=>console.log\\(JSON.stringify\\(JSON.parse\\(d\\),null,2\\)\\)\\);\")"
+    ]
+  }
+}

@@ -68,6 +68,23 @@ function buildGridWhere(db, query, scenarioId, start, end) {
   return { where: conds.join(' AND '), params };
 }
 
+// ── GET /api/supply/actions-meta ──────────────────────────────────────────
+// Returns reference data needed to populate the planning actions panel:
+// production lines (grouped by plant), components, and suppliers.
+
+router.get('/actions-meta', (req, res) => {
+  try {
+    const db         = getDb();
+    const lines      = db.prepare('SELECT line_id, plant_id, name, line_category FROM production_lines ORDER BY plant_id, name').all();
+    const components = db.prepare('SELECT component_id, code, name, supplier_id FROM components ORDER BY name').all();
+    const suppliers  = db.prepare('SELECT supplier_id, name FROM suppliers ORDER BY name').all();
+    db.close();
+    res.json({ lines, components, suppliers });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /api/supply/filters ────────────────────────────────────────────────
 // Returns drop-down options for the workbench filter bar.
 
