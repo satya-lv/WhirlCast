@@ -13,6 +13,7 @@ import React, {
 import {
   Layers, RefreshCw, AlertTriangle, ChevronDown, ChevronRight, Zap,
   BarChart2, GitBranch, Activity, Inbox as InboxIcon,
+  Sliders, Plus, Trophy, ArrowRight,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer,
@@ -762,6 +763,11 @@ export default function SupplyPlanning() {
     setRecsKey(k => k + 1);
   }, [showToast, refreshAll]);
 
+  const handleSwitchScenario = useCallback((scenarioId) => {
+    setFilters(f => ({ ...f, scenarioId }));
+    setMainView('grid');
+  }, []);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 40px)', overflow: 'hidden' }}>
 
@@ -861,6 +867,14 @@ export default function SupplyPlanning() {
           filters={filters}
           recommendations={recommendations}
           onNavigate={setMainView}
+        />
+      )}
+
+      {/* §3.8 Scenario Simulation */}
+      {mainView === 'scenarios' && (
+        <ScenarioSimulation
+          filters={filters}
+          onSwitchScenario={handleSwitchScenario}
         />
       )}
     </div>
@@ -1548,6 +1562,475 @@ function ExceptionInbox({ filters, recommendations, onNavigate }) {
   );
 }
 
+// ── §3.8 Scenario Simulation ──────────────────────────────────────────────────
+
+const SCEN_COLORS = ['#1B3A6B', '#E31837', '#16A34A', '#D97706', '#7C3AED'];
+
+const ACTION_TYPE_LABELS = {
+  BASELINE:            'Baseline',
+  ADD_OVERTIME:        'Add Overtime',
+  SHIFT_PRODUCTION:    'Shift Production',
+  EXPEDITE_SUPPLIER:   'Expedite Supplier',
+  INCREASE_PRODUCTION: 'Increase Production',
+  CUSTOM:              'Custom',
+};
+const ACTION_TYPE_OPTIONS = [
+  { value: 'ADD_OVERTIME',        label: 'Add Overtime' },
+  { value: 'SHIFT_PRODUCTION',    label: 'Shift Production Location' },
+  { value: 'EXPEDITE_SUPPLIER',   label: 'Expedite Supplier' },
+  { value: 'INCREASE_PRODUCTION', label: 'Increase Production' },
+  { value: 'CUSTOM',              label: 'Custom' },
+];
+
+// §3.8 spec metrics: service improvement · cost impact · inventory impact · revenue recovery
+const COMPARE_METRICS = [
+  { key: 'service_level_pct',          label: 'Service Level',       higherIsBetter: true,  fmt: v => `${v?.toFixed(1) ?? '—'}%` },
+  { key: 'revenue_at_risk',            label: 'Revenue at Risk',     higherIsBetter: false, fmt: v => v != null ? `₹${(v / 100000).toFixed(1)}L` : '—' },
+  { key: 'total_shortage',             label: 'Shortage Units',      higherIsBetter: false, fmt: v => v != null ? v.toLocaleString('en-IN') : '—' },
+  { key: 'inventory_days',             label: 'Inventory Days',      higherIsBetter: false, fmt: v => `${v?.toFixed(1) ?? '—'}d` },
+  { key: 'cap_util_pct',               label: 'Capacity Util.',      higherIsBetter: false, fmt: v => `${v?.toFixed(1) ?? '—'}%` },
+  { key: 'avg_material_coverage_days', label: 'Material Coverage',   higherIsBetter: true,  fmt: v => `${v?.toFixed(1) ?? '—'}d` },
+];
+
+const scTh = {
+  padding: '8px 12px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+  letterSpacing: '0.04em', color: 'var(--text-2)', textAlign: 'center',
+  border: '1px solid var(--border)', whiteSpace: 'nowrap', background: '#F8FAFC',
+};
+const scTd = {
+  padding: '8px 12px', fontSize: 12, color: 'var(--text-1)',
+  border: '1px solid var(--border)', textAlign: 'center',
+};
+const scLabel = {
+  display: 'block', fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+  letterSpacing: '0.04em', color: 'var(--text-3)', marginBottom: 5,
+};
+
+function ScenarioSimulation({ filters, onSwitchScenario }) {
+  const [scenarios,  setScenarios]  = useState([]);
+  const [sceLoading, setSceLoading] = useState(false);
+  const [selected,   setSelected]   = useState([]);
+  const [comparison, setComparison] = useState(null);
+  const [comparing,  setComparing]  = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [creating,   setCreating]   = useState(false);
+  const [form,       setForm]       = useState({ name: '', actionType: 'ADD_OVERTIME', description: '' });
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [createdId,  setCreatedId]  = useState(null);
+
+  useEffect(() => {
+    setSceLoading(true);
+    const p = new URLSearchParams({ weekStart: filters.weekStart, weekEnd: filters.weekEnd });
+    fetch(`/api/supply/scenarios?${p}`)
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then(d => setScenarios(d.scenarios || []))
+      .catch(() => {})
+      .finally(() => setSceLoading(false));
+  }, [filters.weekStart, filters.weekEnd, refreshKey]);
+
+  const toggleSelect = id => setSelected(prev =>
+    prev.includes(id) ? prev.filter(i => i !== id) : prev.length < 5 ? [...prev, id] : prev
+  );
+
+  const handleCompare = async () => {
+    if (selected.length < 2) return;
+    setComparing(true);
+    setComparison(null);
+    const p = new URLSearchParams({ ids: selected.join(','), weekStart: filters.weekStart, weekEnd: filters.weekEnd });
+    try {
+      const r = await fetch(`/api/supply/scenarios/compare?${p}`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      setComparison(d);
+    } catch {}
+    finally { setComparing(false); }
+  };
+
+  const handleCreate = async () => {
+    if (!form.name.trim()) return;
+    setCreating(true);
+    try {
+      const r = await fetch('/api/supply/scenarios', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: form.name.trim(), description: form.description, actionType: form.actionType }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      if (d.success) {
+        setRefreshKey(k => k + 1);
+        setSelected(prev => [...prev, d.scenarioId]);
+        setCreatedId(d.scenarioId);
+        setForm({ name: '', actionType: 'ADD_OVERTIME', description: '' });
+        setShowCreate(false);
+      }
+    } catch {}
+    finally { setCreating(false); }
+  };
+
+  const compareRows  = comparison?.comparison || [];
+  const baselineRow  = compareRows.find(r => r.action_type === 'BASELINE') || compareRows[0];
+  const nonBaseRows  = compareRows.filter(r => r.action_type !== 'BASELINE');
+  const allIdentical = compareRows.length > 1 &&
+    compareRows.every(r => r.service_level_pct === baselineRow?.service_level_pct &&
+      r.total_shortage === baselineRow?.total_shortage);
+
+  const pctDelta = (val, baseVal) => {
+    if (baseVal == null || baseVal === 0) return null;
+    return +((val - baseVal) / Math.abs(baseVal) * 100).toFixed(1);
+  };
+
+  // Chart: % delta vs baseline for the 4 spec-required metrics
+  const CHART_METRICS = COMPARE_METRICS.slice(0, 4);
+  const chartData = CHART_METRICS.map(m => {
+    const row = { metric: m.label };
+    nonBaseRows.forEach(sc => { row[sc.name] = pctDelta(sc[m.key], baselineRow?.[m.key]) ?? 0; });
+    return row;
+  });
+
+  // Winners
+  const winners = {
+    service: compareRows.reduce((b, sc) => (!b || sc.service_level_pct > b.service_level_pct) ? sc : b, null),
+    shortage: compareRows.reduce((b, sc) => (!b || sc.total_shortage < b.total_shortage) ? sc : b, null),
+    revenue:  compareRows.reduce((b, sc) => (!b || sc.revenue_at_risk < b.revenue_at_risk)  ? sc : b, null),
+  };
+
+  return (
+    <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex' }}>
+
+      {/* ── Left: Scenario library ── */}
+      <div style={{
+        width: 282, flexShrink: 0, display: 'flex', flexDirection: 'column',
+        borderRight: '1px solid var(--border)', background: 'var(--card)', overflow: 'hidden',
+      }}>
+        {/* Header */}
+        <div style={{ padding: '12px 14px 8px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-1)' }}>Supply Scenarios</span>
+              <span style={{ background: 'var(--navy-accent)', color: 'white', borderRadius: 10, padding: '1px 7px', fontSize: 10, fontWeight: 700 }}>
+                {scenarios.length}
+              </span>
+            </div>
+            <button onClick={() => setShowCreate(true)} style={{
+              display: 'flex', alignItems: 'center', gap: 4, background: 'var(--navy-accent)', color: 'white',
+              border: 'none', borderRadius: 6, padding: '4px 9px', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+            }}>
+              <Plus size={11} /> New
+            </button>
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--text-3)' }}>
+            Select 2–5 · compare side-by-side · W{filters.weekStart}–W{filters.weekEnd}
+          </div>
+        </div>
+
+        {/* Scenario cards list */}
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '8px 10px' }}>
+          {sceLoading && (
+            <div style={{ textAlign: 'center', padding: 24, color: 'var(--text-3)', fontSize: 12 }}>Loading…</div>
+          )}
+          {!sceLoading && scenarios.map(sc => {
+            const isSel = selected.includes(sc.scenario_id);
+            const isNew = sc.scenario_id === createdId;
+            return (
+              <div key={sc.scenario_id} onClick={() => toggleSelect(sc.scenario_id)} style={{
+                border: `2px solid ${isSel ? 'var(--navy-accent)' : isNew ? 'var(--amber)' : 'var(--border)'}`,
+                borderRadius: 9, padding: '9px 11px', marginBottom: 6, cursor: 'pointer',
+                background: isSel ? 'rgba(27,58,107,0.06)' : isNew ? 'rgba(245,158,11,0.04)' : 'var(--card)',
+                transition: 'all 0.12s',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 7 }}>
+                  <input type="checkbox" checked={isSel} readOnly
+                    style={{ marginTop: 2, flexShrink: 0, accentColor: 'var(--navy-accent)', cursor: 'pointer' }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-1)', lineHeight: 1.3,
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {sc.name}
+                    </div>
+                    <div style={{ display: 'flex', gap: 5, marginTop: 5, flexWrap: 'wrap' }}>
+                      <span style={{
+                        fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 7,
+                        background: sc.action_type === 'BASELINE' ? 'rgba(27,58,107,0.1)' : 'rgba(245,158,11,0.1)',
+                        color: sc.action_type === 'BASELINE' ? 'var(--navy-accent)' : 'var(--amber)',
+                      }}>
+                        {ACTION_TYPE_LABELS[sc.action_type] || sc.action_type}
+                      </span>
+                      <span style={{
+                        fontSize: 9, padding: '1px 6px', borderRadius: 7,
+                        background: sc.status === 'active' ? 'rgba(22,163,74,0.1)' : 'var(--bg)',
+                        color: sc.status === 'active' ? 'var(--green)' : 'var(--text-3)',
+                      }}>
+                        {sc.status}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 10, marginTop: 5, fontSize: 10, color: 'var(--text-3)' }}>
+                      <span>SL: <strong style={{ color: 'var(--text-2)' }}>{sc.service_level_pct?.toFixed(1) ?? '—'}%</strong></span>
+                      <span>Gap: <strong style={{ color: 'var(--text-2)' }}>{sc.total_shortage?.toLocaleString('en-IN') ?? '—'}</strong></span>
+                    </div>
+                    {isNew && (
+                      <button onClick={e => { e.stopPropagation(); onSwitchScenario(sc.scenario_id); }} style={{
+                        marginTop: 7, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                        background: 'var(--amber)', color: 'white', border: 'none',
+                        borderRadius: 6, padding: '4px 0', fontSize: 10, fontWeight: 700, cursor: 'pointer', width: '100%',
+                      }}>
+                        <ArrowRight size={10} /> Activate in Grid →
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Footer: compare button */}
+        <div style={{ padding: '10px 12px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
+          {selected.length === 1 && (
+            <div style={{ fontSize: 10, color: 'var(--amber)', marginBottom: 6, textAlign: 'center' }}>
+              Select 1 more to compare
+            </div>
+          )}
+          <button onClick={handleCompare} disabled={selected.length < 2 || comparing} style={{
+            width: '100%', padding: '9px', borderRadius: 8, border: 'none', fontSize: 12, fontWeight: 700,
+            cursor: selected.length >= 2 ? 'pointer' : 'not-allowed',
+            background: selected.length >= 2 ? 'var(--navy-accent)' : '#E5E7EB',
+            color: selected.length >= 2 ? 'white' : 'var(--text-3)',
+          }}>
+            {comparing ? 'Comparing…' : `Compare${selected.length >= 2 ? ` (${selected.length})` : ''} →`}
+          </button>
+          <div style={{ textAlign: 'center', fontSize: 10, color: 'var(--text-3)', marginTop: 5 }}>
+            Select up to 5 (min 2)
+          </div>
+        </div>
+      </div>
+
+      {/* ── Right: Comparison panel ── */}
+      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 16 }}>
+
+        {/* Empty state */}
+        {!comparison && !comparing && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            height: '100%', color: 'var(--text-3)', gap: 12, textAlign: 'center' }}>
+            <Trophy size={52} strokeWidth={1} style={{ opacity: 0.35 }} />
+            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-2)' }}>Select 2+ scenarios to compare</div>
+            <div style={{ fontSize: 12, maxWidth: 380, lineHeight: 1.7 }}>
+              Check scenarios in the library, then click <strong>Compare</strong>. Click <strong>+ New</strong> to
+              create a what-if scenario, apply changes in the Planning Grid, then re-compare to see real deltas.
+            </div>
+          </div>
+        )}
+
+        {/* Loading */}
+        {comparing && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-3)', fontSize: 13 }}>
+            Computing comparison…
+          </div>
+        )}
+
+        {/* Results */}
+        {comparison && !comparing && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+            {/* Callout when all scenarios are still identical to baseline */}
+            {allIdentical && (
+              <div style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)',
+                borderRadius: 10, padding: '10px 14px', fontSize: 12, color: 'var(--amber)',
+                display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+                <div>
+                  <strong>All scenarios show identical baseline numbers.</strong> New scenarios are exact clones
+                  of Baseline until you apply planning actions. Select a new scenario in the library,
+                  click "Activate in Grid", then use the Actions panel (Add Overtime, Expedite Supplier, etc.)
+                  to modify its planning orders. Re-compare to see real deltas.
+                </div>
+              </div>
+            )}
+
+            {/* Winner cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+              {[
+                { label: 'Best Service Level',  winner: winners.service,  fmt: w => `${w.service_level_pct?.toFixed(1)}%` },
+                { label: 'Lowest Shortage',     winner: winners.shortage, fmt: w => `${w.total_shortage?.toLocaleString('en-IN')} units` },
+                { label: 'Lowest Revenue Risk', winner: winners.revenue,  fmt: w => `₹${(w.revenue_at_risk / 100000).toFixed(1)}L` },
+              ].map((item, i) => (
+                <div key={i} style={{ background: 'var(--card)', borderRadius: 10, padding: '14px 16px',
+                  border: '1px solid var(--border)', borderTop: '3px solid var(--amber)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 8 }}>
+                    <Trophy size={12} color="var(--amber)" />
+                    <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--amber)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      {item.label}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-1)', marginBottom: 3 }}>
+                    {item.winner?.name ?? '—'}
+                  </div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--navy-accent)' }}>
+                    {item.winner ? item.fmt(item.winner) : '—'}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Delta chart vs baseline — only when non-baseline scenarios exist */}
+            {nonBaseRows.length > 0 && (
+              <div style={{ background: 'var(--card)', borderRadius: 10, padding: '16px 20px', border: '1px solid var(--border)' }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-1)', marginBottom: 2 }}>
+                  % Change vs Baseline
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--text-3)', marginBottom: 14 }}>
+                  Positive = improvement for ↑ metrics · Negative = improvement for ↓ metrics
+                </div>
+                <ResponsiveContainer width="100%" height={180}>
+                  <BarChart data={chartData} margin={{ top: 4, right: 8, left: -8, bottom: 0 }} barGap={3} barSize={18}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                    <XAxis dataKey="metric" tick={{ fontSize: 10, fill: 'var(--text-3)' }} tickLine={false} axisLine={false} />
+                    <YAxis tick={{ fontSize: 10, fill: 'var(--text-3)' }} tickLine={false} axisLine={false} width={40} unit="%" />
+                    <Tooltip
+                      contentStyle={{ fontSize: 11, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8 }}
+                      formatter={(v, n) => [`${v > 0 ? '+' : ''}${v}%`, n]}
+                    />
+                    {nonBaseRows.map((sc, i) => (
+                      <Bar key={sc.scenario_id} dataKey={sc.name} fill={SCEN_COLORS[(i + 1) % SCEN_COLORS.length]}
+                        radius={[3, 3, 0, 0]} name={sc.name} />
+                    ))}
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
+            {/* Full metrics comparison table */}
+            <div style={{ background: 'var(--card)', borderRadius: 10, border: '1px solid var(--border)', overflow: 'hidden' }}>
+              <div style={{ padding: '11px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-1)' }}>
+                  Detailed Comparison — W{comparison.weekRange?.start}–W{comparison.weekRange?.end}
+                </span>
+                <span style={{ fontSize: 10, color: 'var(--text-3)' }}>{compareRows.length} scenarios</span>
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 560 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ ...scTh, textAlign: 'left', minWidth: 150 }}>Metric</th>
+                      {compareRows.map((sc, i) => (
+                        <th key={sc.scenario_id} style={{ ...scTh, minWidth: 120, background: sc.action_type === 'BASELINE' ? 'rgba(27,58,107,0.06)' : '#F8FAFC' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, marginBottom: 2 }}>
+                            <span style={{ width: 8, height: 8, borderRadius: '50%', background: SCEN_COLORS[i % SCEN_COLORS.length], flexShrink: 0 }} />
+                            <span style={{ fontSize: 11, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 100 }}>{sc.name}</span>
+                          </div>
+                          <div style={{ fontSize: 9, fontWeight: 400, color: 'var(--text-3)' }}>
+                            {ACTION_TYPE_LABELS[sc.action_type] || sc.action_type}
+                          </div>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {COMPARE_METRICS.map((m, mi) => (
+                      <tr key={m.key} style={{ background: mi % 2 === 0 ? 'var(--card)' : '#FAFAFA' }}>
+                        <td style={{ ...scTd, textAlign: 'left', fontWeight: 600, color: 'var(--text-2)' }}>
+                          {m.label}
+                          <span style={{ marginLeft: 5, fontSize: 9, color: 'var(--text-3)', fontWeight: 400 }}>
+                            {m.higherIsBetter ? '↑ better' : '↓ better'}
+                          </span>
+                        </td>
+                        {compareRows.map(sc => {
+                          const val     = sc[m.key];
+                          const isBase  = sc.action_type === 'BASELINE';
+                          const delta   = isBase ? null : pctDelta(val, baselineRow?.[m.key]);
+                          const improved = delta != null && (m.higherIsBetter ? delta > 0 : delta < 0);
+                          const worse    = delta != null && (m.higherIsBetter ? delta < 0 : delta > 0);
+                          return (
+                            <td key={sc.scenario_id} style={{ ...scTd, background: isBase ? 'rgba(27,58,107,0.04)' : undefined }}>
+                              <div style={{ fontWeight: 700, fontSize: 12 }}>{m.fmt(val)}</div>
+                              {delta != null && delta !== 0 && (
+                                <div style={{ fontSize: 10, fontWeight: 700, marginTop: 2,
+                                  color: improved ? 'var(--green)' : worse ? 'var(--danger)' : 'var(--text-3)' }}>
+                                  {delta > 0 ? '+' : ''}{delta}%
+                                </div>
+                              )}
+                              {delta === 0 && (
+                                <div style={{ fontSize: 9, color: 'var(--text-3)', marginTop: 2 }}>no change</div>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+          </div>
+        )}
+      </div>
+
+      {/* ── Create Scenario modal ── */}
+      {showCreate && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 300,
+          display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          onClick={() => setShowCreate(false)}>
+          <div style={{ background: 'var(--card)', borderRadius: 14, padding: '24px 24px 20px',
+            width: 420, maxWidth: '90%', boxShadow: '0 8px 32px rgba(0,0,0,0.3)', border: '0.5px solid var(--border)' }}
+            onClick={e => e.stopPropagation()}>
+
+            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 16, color: 'var(--text-1)' }}>
+              Create Supply Scenario
+            </div>
+
+            <div style={{ marginBottom: 13 }}>
+              <label style={scLabel}>Scenario Name *</label>
+              <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                placeholder="e.g. Add Saturday Overtime — AC Line Pune"
+                style={{ width: '100%', padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 8,
+                  fontSize: 13, color: 'var(--text-1)', background: 'var(--bg)', boxSizing: 'border-box', fontFamily: 'inherit' }} />
+            </div>
+
+            <div style={{ marginBottom: 13 }}>
+              <label style={scLabel}>Action Type</label>
+              <select value={form.actionType} onChange={e => setForm(f => ({ ...f, actionType: e.target.value }))}
+                style={{ width: '100%', padding: '7px 10px', border: '1px solid var(--border)', borderRadius: 8,
+                  fontSize: 13, color: 'var(--text-1)', background: 'var(--bg)', boxSizing: 'border-box' }}>
+                {ACTION_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={scLabel}>Description (optional)</label>
+              <textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                rows={2} placeholder="Describe the what-if assumption…"
+                style={{ width: '100%', padding: '7px 10px', border: '1px solid var(--border)', borderRadius: 8,
+                  fontSize: 12, color: 'var(--text-1)', background: 'var(--bg)', resize: 'vertical',
+                  boxSizing: 'border-box', fontFamily: 'inherit' }} />
+            </div>
+
+            <div style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.2)',
+              borderRadius: 8, padding: '9px 12px', marginBottom: 18, fontSize: 11, color: 'var(--amber)', lineHeight: 1.6 }}>
+              A full clone of the Baseline is created. Activate it in the Planning Grid and apply actions
+              (Add Overtime, Expedite Supplier, etc.) to modify its numbers, then come back to compare.
+            </div>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => setShowCreate(false)} style={{
+                flex: 1, padding: '9px', borderRadius: 8, border: '1px solid var(--border)',
+                background: 'var(--bg)', cursor: 'pointer', fontSize: 13, color: 'var(--text-2)',
+              }}>Cancel</button>
+              <button onClick={handleCreate} disabled={!form.name.trim() || creating} style={{
+                flex: 2, padding: '9px', borderRadius: 8, border: 'none', fontWeight: 700, fontSize: 13,
+                cursor: form.name.trim() ? 'pointer' : 'not-allowed',
+                background: form.name.trim() ? 'var(--navy-accent)' : '#E5E7EB',
+                color: form.name.trim() ? 'white' : 'var(--text-3)',
+              }}>
+                {creating ? 'Creating…' : '+ Create Scenario'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── View tabs (main workbench sections) ──────────────────────────────────────
 
 function ViewTabs({ active, onChange, recCount }) {
@@ -1557,6 +2040,7 @@ function ViewTabs({ active, onChange, recCount }) {
     { id: 'pegging',         label: 'Pegging',          icon: GitBranch },
     { id: 'recommendations', label: 'Recommendations',  icon: BarChart2,  badge: recCount },
     { id: 'inbox',           label: 'Inbox',            icon: InboxIcon,  badge: recCount },
+    { id: 'scenarios',       label: 'Scenarios',        icon: Sliders },
   ];
   return (
     <div style={{ display: 'flex', gap: 2, padding: '6px 16px', background: 'var(--card)', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
