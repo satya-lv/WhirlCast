@@ -42,10 +42,8 @@ export default function Navbar() {
   const [dark, setDark] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
-  const [resetting, setResetting] = useState(false);
 
   const handleReset = async () => {
-    setResetting(true);
     setShowResetModal(false);
     try {
       const res = await fetch('/api/demo/reset', { method: 'POST' });
@@ -57,7 +55,6 @@ export default function Navbar() {
     } catch {
       /* ignore */
     }
-    setResetting(false);
   };
 
   useEffect(() => {
