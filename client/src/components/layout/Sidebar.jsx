@@ -21,10 +21,10 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import {
   LayoutDashboard, BarChart2, GitBranch, Zap, Plus,
-  Package, RefreshCw, Layers, Calendar,
+  Layers,
   Users, AlertTriangle, Truck,
   Shield, CheckSquare,
-  FileBarChart, Settings, Lock, LogOut, Sun, Moon, RotateCcw,
+  FileBarChart, Settings, LogOut, Sun, Moon, RotateCcw,
 } from 'lucide-react';
 
 // ── Navigation structure ───────────────────────────────────────────────────
@@ -54,10 +54,7 @@ const NAV_GROUPS = [
       { label: 'Scenarios',               path: '/scenarios',      icon: GitBranch,   roles: ['demand_planning'] },
       { label: 'Demand Sensing',          path: '/demand-sensing', icon: Zap,         roles: ['demand_planning'] },
       { label: 'NPI Forecasting',         path: '/npi',            icon: Plus,        roles: ['demand_planning'] },
-      { label: 'Inventory Optimization',  comingSoon: true,        icon: Package,     roles: ['demand_planning'] },
-      { label: 'Replenishment Planning',  comingSoon: true,        icon: RefreshCw,   roles: ['demand_planning'] },
-      { label: 'Raw Material Planning',   comingSoon: true,        icon: Layers,      roles: ['demand_planning'] },
-      { label: 'Production Scheduling',   comingSoon: true,        icon: Calendar,    roles: ['demand_planning'] },
+      { label: 'Supply Planning',          path: '/supply',         icon: Layers,      roles: ['demand_planning'] },
     ],
   },
   {
