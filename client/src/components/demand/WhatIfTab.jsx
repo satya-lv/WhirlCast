@@ -29,6 +29,12 @@ import {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+function toRelWeek(w) {
+  if (w < 24)   return `W${w}`;
+  if (w === 24) return 'Current Week';
+  return `Week +${w - 24}`;
+}
+
 function fmtINR(v) {
   if (v == null) return '—';
   const abs  = Math.abs(v);
@@ -220,13 +226,13 @@ function WeekRangeSelector({ result, preset, onPreset, customFrom, customTo, onC
           <span style={{ fontSize: 11, color: 'var(--text-2)' }}>From</span>
           <select value={customFrom} onChange={e => onCustomFrom(parseInt(e.target.value))} style={selectStyle}>
             {weeks.map(w => (
-              <option key={w.weekNumber} value={w.weekNumber}>Week {w.weekNumber}</option>
+              <option key={w.weekNumber} value={w.weekNumber}>{toRelWeek(w.weekNumber)}</option>
             ))}
           </select>
           <span style={{ fontSize: 11, color: 'var(--text-2)' }}>To</span>
           <select value={customTo} onChange={e => onCustomTo(parseInt(e.target.value))} style={selectStyle}>
             {weeks.filter(w => w.weekNumber >= customFrom).map(w => (
-              <option key={w.weekNumber} value={w.weekNumber}>Week {w.weekNumber}</option>
+              <option key={w.weekNumber} value={w.weekNumber}>{toRelWeek(w.weekNumber)}</option>
             ))}
           </select>
         </div>
@@ -876,7 +882,7 @@ function ResultsPanel({ result }) {
         </span>
         <span style={{ flex: 1 }} />
         <span style={{ fontSize: 10, color: 'var(--text-3)' }}>
-          Wks {weeks[0]?.weekNumber}–{weeks[weeks.length - 1]?.weekNumber}
+          Current horizon
         </span>
       </div>
 
@@ -912,7 +918,7 @@ function ResultsPanel({ result }) {
             <XAxis
               dataKey="weekNumber"
               tick={{ fontSize: 10 }}
-              tickFormatter={v => `W${v}`}
+              tickFormatter={v => v < 24 ? `W${v}` : v === 24 ? 'Now' : `+${v - 24}w`}
               interval={3}
             />
             <YAxis
@@ -951,7 +957,7 @@ function ResultsPanel({ result }) {
 
       {/* Base totals footnote */}
       <div style={{ fontSize: 10, color: 'var(--text-3)', paddingLeft: 2 }}>
-        Base total (wks {weeks[0]?.weekNumber}–{weeks[weeks.length - 1]?.weekNumber}):&nbsp;
+        Base total (current horizon):&nbsp;
         {summary.baseVolume.toLocaleString('en-IN')} units ·&nbsp;
         {fmtINRPlain(summary.baseRevenue)} revenue
       </div>

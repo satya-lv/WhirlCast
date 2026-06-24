@@ -233,6 +233,14 @@ function buildFlatRows(tree, expandedSkus, expandedLocs, expandedPlants, measure
   return result;
 }
 
+// ── Week label helper ─────────────────────────────────────────────────────────
+
+function toRelWeekShort(w) {
+  if (w < 24)   return `W${w}`;
+  if (w === 24) return 'Now';
+  return `+${w - 24}w`;
+}
+
 // ── Value helpers ─────────────────────────────────────────────────────────────
 
 function getMeasureValue(row, week, tree) {
@@ -428,7 +436,7 @@ const RightCell = memo(({ columnIndex, rowIndex, style, data }) => {
   const cellKey = `${row.key}|w${week}`;
 
   const cellBg = highlight || rs.bg;
-  const isEditable = row.type === 'measure' && row.editable;
+  const isEditable = row.type === 'measure' && row.editable && week >= 24;
 
   const textColor = row.type === 'sku'      ? 'white'
                   : row.type === 'location' ? 'rgba(255,255,255,0.85)'
@@ -738,11 +746,12 @@ export default function PlanningGrid({
                 <div key={w} style={{
                   width: COL_W, flexShrink: 0,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 10, fontWeight: 700, color: 'var(--text-2)',
-                  letterSpacing: '0.3px',
+                  fontSize: 10, fontWeight: 700, letterSpacing: '0.3px',
+                  color: w === 24 ? 'white' : 'var(--text-2)',
+                  background: w === 24 ? 'var(--navy-accent)' : 'transparent',
                   borderRight: '1px solid var(--border)',
                 }}>
-                  W{w}
+                  {toRelWeekShort(w)}
                 </div>
               ))}
             </div>

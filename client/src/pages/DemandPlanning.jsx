@@ -37,9 +37,9 @@ async function fetchKPIs(filters) {
   return r.json();
 }
 
-async function fetchAllGridPages(filters) {
+async function fetchAllGridPages(filters, weekStart = 24) {
   const base = {
-    weekStart: 1, weekEnd: 52, pageSize: 50,
+    weekStart, weekEnd: 52, pageSize: 50,
     ...(filters.locationId ? { locationId: filters.locationId } : {}),
     ...(filters.skuFamily  ? { skuFamily:  filters.skuFamily  } : {}),
     ...(filters.sku        ? { sku:        filters.sku        } : {}),
@@ -60,7 +60,7 @@ async function fetchAllGridPages(filters) {
     );
     for (const d of rest) all.push(...d.rows);
   }
-  return { rows: all, weeks: d1.weeks, editableFrom: d1.weekRange?.editableFrom ?? 27 };
+  return { rows: all, weeks: d1.weeks, editableFrom: d1.weekRange?.editableFrom ?? 24 };
 }
 
 async function fetchExceptions() {
@@ -300,7 +300,8 @@ export default function DemandPlanning() {
   const [gridRows,   setGridRows]   = useState([]);
   const [gridWeeks,  setGridWeeks]  = useState([]);
   const [gridLoading, setGridLoading] = useState(false);
-  const [editableFrom, setEditableFrom] = useState(27);
+  const [editableFrom, setEditableFrom] = useState(24);
+  const [showHistory,  setShowHistory]  = useState(false);
   const [activeTab,  setActiveTab]  = useState('grid');
   const [error,      setError]      = useState(null);
   const [patternsData,      setPatternsData]      = useState(null);
@@ -340,7 +341,7 @@ export default function DemandPlanning() {
     setGridLoading(true);
     setError(null);
     const timer = setTimeout(() => {
-      fetchAllGridPages(filters)
+      fetchAllGridPages(filters, showHistory ? 1 : 24)
         .then(({ rows, weeks, editableFrom: ef }) => {
           if (!cancelled) {
             setGridRows(rows);
@@ -352,7 +353,7 @@ export default function DemandPlanning() {
         .finally(() => { if (!cancelled) setGridLoading(false); });
     }, 300);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [filters]);
+  }, [filters, showHistory]);
 
   // Fetch KPIs (350ms debounce — slightly after grid)
   useEffect(() => {
@@ -386,7 +387,7 @@ export default function DemandPlanning() {
     if (!gridNeedsRefresh.current) return;
     gridNeedsRefresh.current = false;
     setGridLoading(true);
-    fetchAllGridPages(filters)
+    fetchAllGridPages(filters, showHistory ? 1 : 24)
       .then(({ rows, weeks, editableFrom: ef }) => {
         setGridRows(rows);
         setGridWeeks(weeks);
@@ -394,7 +395,7 @@ export default function DemandPlanning() {
       })
       .catch(err => setError(err.message))
       .finally(() => setGridLoading(false));
-  }, [activeTab, filters]);
+  }, [activeTab, filters, showHistory]);
 
   // Fetch patterns data when Patterns tab is active (or when filters change while on it)
   const loadPatterns = useCallback(() => {
@@ -424,22 +425,6 @@ export default function DemandPlanning() {
     if (activeTab !== 'exceptions') return;
     loadExceptions();
   }, [activeTab, loadExceptions]);
-
-  const handleAcknowledge = useCallback(async (exceptionId) => {
-    const res = await fetch(`/api/demand-planning/exceptions/${exceptionId}/acknowledge`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ acknowledged: 1 }),
-    });
-    if (!res.ok) throw new Error(`acknowledge ${res.status}`);
-    // Optimistic: remove from local list immediately — no re-fetch needed
-    setExceptionsData(prev => prev ? {
-      ...prev,
-      exceptions: prev.exceptions.filter(e => e.exceptionId !== exceptionId),
-    } : prev);
-    // Decrement Open Exceptions on the KPI bar
-    refreshKPIs();
-  }, [refreshKPIs]);
 
   const handleRecalculate = useCallback(async () => {
     setRecalculating(true);
@@ -546,6 +531,8 @@ export default function DemandPlanning() {
             loading={gridLoading}
             height={gridDims.height}
             width={gridDims.width}
+            showHistory={showHistory}
+            onToggleHistory={() => setShowHistory(h => !h)}
           />
         )}
       </div>
@@ -585,7 +572,6 @@ export default function DemandPlanning() {
         <ExceptionsTab
           data={exceptionsData}
           loading={exceptionsLoading}
-          onAcknowledge={handleAcknowledge}
         />
       </div>
 

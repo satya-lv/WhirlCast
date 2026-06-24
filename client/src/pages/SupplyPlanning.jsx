@@ -22,6 +22,19 @@ import PlanningGrid, { MEASURE_GROUPS } from '../components/supply/PlanningGrid'
 import { ActionButton, simulatedAction } from '../components/shared/ActionButton';
 import { useToast } from '../context/ToastContext';
 
+// Mirrors server/routes/demand_planning.js EDITABLE_FROM_WEEK (cannot import directly
+// from a CommonJS server module — expose via /api/supply/filters if this needs to be
+// fully dynamic; for now this is the single frontend point of truth).
+const CURRENT_WEEK_BOUNDARY = 24;
+
+// ── Week label helper ─────────────────────────────────────────────────────────
+
+function toRelWeek(w) {
+  if (w < 24)   return `W${w}`;
+  if (w === 24) return 'Current Week';
+  return `Week +${w - 24}`;
+}
+
 // ── Fetch helpers ──────────────────────────────────────────────────────────────
 
 async function fetchAllGridPages(filters) {
@@ -180,7 +193,7 @@ function StatusCountRow({ counts, loading }) {
 
 // ── Filter bar (§3.1) ─────────────────────────────────────────────────────────
 
-function FilterBar({ options, filters, onChange }) {
+function FilterBar({ options, filters, onChange, showHistory, onToggleHistory }) {
   if (!options) {
     return (
       <div style={s.filterBar}>
@@ -210,16 +223,18 @@ function FilterBar({ options, filters, onChange }) {
           </option>
         ))}
       </FSelect>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <label style={s.label}>Weeks</label>
-        <input type="number" min={1} max={52} value={filters.weekStart}
-          onChange={e => set('weekStart', Math.max(1, Math.min(52, parseInt(e.target.value) || 1)))}
-          style={{ ...s.input, width: 48 }} />
-        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>—</span>
-        <input type="number" min={1} max={52} value={filters.weekEnd}
-          onChange={e => set('weekEnd', Math.max(filters.weekStart, Math.min(52, parseInt(e.target.value) || 52)))}
-          style={{ ...s.input, width: 48 }} />
-      </div>
+      <button
+        onClick={onToggleHistory}
+        style={{
+          fontSize: 10, fontWeight: 700, padding: '3px 10px', borderRadius: 6,
+          border: `1px solid ${showHistory ? 'var(--navy-accent)' : 'var(--border)'}`,
+          background: showHistory ? 'var(--navy-accent)' : 'var(--bg)',
+          color: showHistory ? 'white' : 'var(--text-2)',
+          cursor: 'pointer',
+        }}
+      >
+        {showHistory ? 'Hide History' : 'Show History'}
+      </button>
     </div>
   );
 }
@@ -287,7 +302,7 @@ function MeasureGroupTabs({ value, onChange, showActions, onToggleActions }) {
 
 function ActionsPanel({ filterOptions, actionsMeta, metaError, filters, onActionComplete, initialCtx }) {
   const [ctx, setCtx] = useState({
-    sku: '', locationId: '', weekNumber: String(filters.weekStart || 22),
+    sku: '', locationId: '', weekNumber: String(filters.weekStart || CURRENT_WEEK_BOUNDARY),
     plantId: '', lineId: '', componentId: '', supplierId: '',
   });
 
@@ -299,7 +314,7 @@ function ActionsPanel({ filterOptions, actionsMeta, metaError, filters, onAction
   const [openSection, setOpenSection] = useState('increase');
   const [deltaQty,   setDeltaQty]   = useState(100);
   const [pullFrom,   setPullFrom]   = useState(filters.weekStart);
-  const [pullTo,     setPullTo]     = useState(Math.max(1, (filters.weekStart || 22) - 1));
+  const [pullTo,     setPullTo]     = useState(Math.max(CURRENT_WEEK_BOUNDARY, (filters.weekStart || CURRENT_WEEK_BOUNDARY) - 1));
   const [pushFrom,   setPushFrom]   = useState(filters.weekStart);
   const [pushTo,     setPushTo]     = useState(Math.min(52, (filters.weekStart || 22) + 1));
   const [moveQty,    setMoveQty]    = useState(50);
@@ -664,9 +679,18 @@ export default function SupplyPlanning() {
   const [actionsMeta,   setActionsMeta]   = useState(null);
   const [metaError,     setMetaError]     = useState(false);
   const [filters, setFilters] = useState({
-    scenarioId: 1, weekStart: 1, weekEnd: 52,
+    scenarioId: 1, weekStart: 24, weekEnd: 52,
     region: '', plant: '', skuFamily: '', sku: '',
   });
+  const [showHistory, setShowHistory] = useState(false);
+
+  const handleToggleHistory = useCallback(() => {
+    setShowHistory(prev => {
+      const next = !prev;
+      setFilters(f => ({ ...f, weekStart: next ? 1 : 24 }));
+      return next;
+    });
+  }, []);
   const [rows,       setRows]       = useState([]);
   const [weeks,      setWeeks]      = useState([]);
   const [loading,    setLoading]    = useState(false);
@@ -795,7 +819,7 @@ export default function SupplyPlanning() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Action failed');
       showToast?.(
-        `Production updated: W${week} ${row.sku} → ${Math.round(newValue).toLocaleString('en-IN')} units`,
+        `Production updated: ${row.sku} → ${Math.round(newValue).toLocaleString('en-IN')} units`,
         'success',
       );
       refreshAll();
@@ -890,7 +914,7 @@ export default function SupplyPlanning() {
             Supply Planning Workbench
           </div>
           <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
-            Time-phased planning grid · {rows.length} SKU-locations · W{filters.weekStart}–W{filters.weekEnd}
+            Time-phased planning grid · {rows.length} SKU-locations · {showHistory ? 'Including history' : 'Current planning horizon'}
           </div>
         </div>
         {loading && (
@@ -902,7 +926,10 @@ export default function SupplyPlanning() {
       </div>
 
       {/* §3.1 Filter bar */}
-      <FilterBar options={filterOptions} filters={filters} onChange={setFilters} />
+      <FilterBar
+        options={filterOptions} filters={filters} onChange={setFilters}
+        showHistory={showHistory} onToggleHistory={handleToggleHistory}
+      />
 
       {/* §3.2 KPI strip */}
       <SupplyKPIStrip kpis={kpis} loading={kpiLoading} />
@@ -988,6 +1015,7 @@ export default function SupplyPlanning() {
           filters={filters}
           recommendations={recommendations}
           onNavigate={setMainView}
+          showHistory={showHistory}
         />
       )}
 
@@ -997,6 +1025,7 @@ export default function SupplyPlanning() {
           filters={filters}
           onSwitchScenario={handleSwitchScenario}
           onResetComplete={handleResetComplete}
+          showHistory={showHistory}
         />
       )}
     </div>
@@ -1168,7 +1197,7 @@ function DemandImpactView({ rows = [], summary }) {
               <tr key={i} style={{ borderBottom: '1px solid var(--border)', background: i % 2 === 0 ? 'transparent' : 'var(--bg)' }}>
                 <td style={{ padding: '8px 10px', fontWeight: 600, color: 'var(--text-1)', whiteSpace: 'nowrap' }}>{row.sku}</td>
                 <td style={{ padding: '8px 10px', color: 'var(--text-2)', whiteSpace: 'nowrap' }}>{row.location_name}</td>
-                <td style={{ padding: '8px 10px', color: 'var(--text-2)' }}>W{row.week_number}</td>
+                <td style={{ padding: '8px 10px', color: 'var(--text-2)' }}>{toRelWeek(row.week_number)}</td>
                 <td style={{ padding: '8px 10px', color: 'var(--text-2)' }}>{Math.round(row.forecast_demand ?? 0).toLocaleString('en-IN')}</td>
                 <td style={{ padding: '8px 10px', color: 'var(--text-2)' }}>{Math.round(row.customer_orders ?? 0).toLocaleString('en-IN')}</td>
                 <td style={{ padding: '8px 10px', color: 'var(--danger)', fontWeight: 700 }}>{Math.round(row.shortage_qty ?? 0).toLocaleString('en-IN')}</td>
@@ -1290,7 +1319,7 @@ function PeggingChain({ chain, cell }) {
   return (
     <div>
       <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 12 }}>
-        {cell.sku} · {cell.locationName} · Week {cell.weekNumber}
+        {cell.sku} · {cell.locationName} · {toRelWeek(cell.weekNumber)}
       </div>
       <div style={{ overflowX: 'auto', paddingBottom: 12 }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', minWidth: 'max-content' }}>
@@ -1676,7 +1705,7 @@ function InboxItem({ rec, onNavigate }) {
   );
 }
 
-function ExceptionInbox({ filters, recommendations, onNavigate }) {
+function ExceptionInbox({ filters, recommendations, onNavigate, showHistory }) {
   const recs = recommendations?.recommendations || [];
   const high = recs.filter(r => r.priority === 'HIGH');
   const med  = recs.filter(r => r.priority === 'MEDIUM');
@@ -1689,7 +1718,7 @@ function ExceptionInbox({ filters, recommendations, onNavigate }) {
     <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 16 }}>
       <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)', marginBottom: 4 }}>Planner Exception Inbox</div>
       <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 16 }}>
-        Active constraint issues needing attention · W{filters.weekStart}–W{filters.weekEnd} · Scenario {filters.scenarioId}
+        Active constraint issues needing attention · {showHistory ? 'Including history' : 'Current planning horizon'} · Scenario {filters.scenarioId}
       </div>
 
       {recs.length === 0 && (
@@ -1767,7 +1796,7 @@ const scLabel = {
   letterSpacing: '0.04em', color: 'var(--text-3)', marginBottom: 5,
 };
 
-function ScenarioSimulation({ filters, onSwitchScenario, onResetComplete }) {
+function ScenarioSimulation({ filters, onSwitchScenario, onResetComplete, showHistory }) {
   const [scenarios,  setScenarios]  = useState([]);
   const [sceLoading, setSceLoading] = useState(false);
   const [selected,   setSelected]   = useState([]);
@@ -1918,7 +1947,7 @@ function ScenarioSimulation({ filters, onSwitchScenario, onResetComplete }) {
             </button>
           </div>
           <div style={{ fontSize: 10, color: 'var(--text-3)' }}>
-            Select 2–5 · compare side-by-side · W{filters.weekStart}–W{filters.weekEnd}
+            Select 2–5 · compare side-by-side · {showHistory ? 'Including history' : 'Current planning horizon'}
           </div>
         </div>
 

@@ -19,7 +19,7 @@ const router  = express.Router();
 const { getDb } = require('../db/schema');
 const { computeAbcXyzClassification } = require('../db/seed_demand');
 
-const EDITABLE_FROM_WEEK = 27;
+const EDITABLE_FROM_WEEK = 24;
 const DEMAND_YEAR        = 2025;
 
 // ── Shared helpers ─────────────────────────────────────────────────────────
@@ -168,7 +168,7 @@ router.get('/kpis', (req, res) => {
         SUM(CASE WHEN pm.abc_class = 'A' THEN dwd.final_consensus ELSE 0 END)                   AS aClassDemand
       FROM demand_weekly_data dwd
       JOIN product_master pm ON dwd.sku = pm.sku
-      WHERE ${where}
+      WHERE ${where} AND dwd.week_number >= ${EDITABLE_FROM_WEEK}
     `).get(...params);
 
     // Inventory days: demand-weighted average of safety_stock_weeks × 7 per SKU.
@@ -181,7 +181,7 @@ router.get('/kpis', (req, res) => {
       FROM demand_weekly_data dwd
       JOIN sku_planning_params spp ON dwd.sku = spp.sku
       JOIN product_master pm       ON dwd.sku = pm.sku
-      WHERE ${where}
+      WHERE ${where} AND dwd.week_number >= ${EDITABLE_FROM_WEEK}
       GROUP BY dwd.sku
     `).all(...params);
 
@@ -212,7 +212,7 @@ router.get('/kpis', (req, res) => {
           value:  Math.round(totalDemand),
           unit:   'units',
           label:  'Total Forecast Demand',
-          source: 'SUM(final_consensus) — demand_weekly_data, all 52 weeks, filtered set',
+          source: `SUM(final_consensus) — demand_weekly_data, weeks ${EDITABLE_FROM_WEEK}–52 (current planning horizon), filtered set`,
         },
         forecastAccuracyPct: {
           value:  parseFloat(((1 - mape) * 100).toFixed(1)),

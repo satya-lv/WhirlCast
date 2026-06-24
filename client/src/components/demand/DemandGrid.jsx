@@ -125,6 +125,14 @@ function buildFlatRows(tree, expandedSkus, expandedLocs) {
   return result;
 }
 
+// ── Week label helper ─────────────────────────────────────────────────────────
+
+function toRelWeekShort(w) {
+  if (w < 24)   return `W${w}`;
+  if (w === 24) return 'Now';
+  return `+${w - 24}w`;
+}
+
 // ── Value helpers ─────────────────────────────────────────────────────────────
 
 function formatVal(v, fmt) {
@@ -238,6 +246,9 @@ const RightCell = memo(function RightCell({ columnIndex, rowIndex, style, data }
     ? getCellHighlight(row.measureKey, value, week, editableFrom)
     : null;
   const isEditable = row.type === 'measure' && row.editable && week >= editableFrom;
+  const displayStr = row.type === 'measure' && row.measureKey === 'actualSales' && week >= 24
+    ? '—'
+    : formatVal(value, row.measureFmt || 'int');
 
   return (
     <div
@@ -258,7 +269,7 @@ const RightCell = memo(function RightCell({ columnIndex, rowIndex, style, data }
         cursor: isEditable ? 'cell' : 'default',
       }}
     >
-      {formatVal(value, row.measureFmt || 'int')}
+      {displayStr}
     </div>
   );
 });
@@ -322,11 +333,13 @@ const btnStyle = {
 export default function DemandGrid({
   rows = [],
   weeks = [],
-  editableFrom = 27,
+  editableFrom = 24,
   onCellEdit,
   loading = false,
   height = 500,
   width = 900,
+  showHistory = false,
+  onToggleHistory,
 }) {
   const [expandedSkus, setExpandedSkus] = useState(new Set());
   const [expandedLocs, setExpandedLocs] = useState(new Set());
@@ -451,6 +464,19 @@ export default function DemandGrid({
       }}>
         <span>{flatRows.length} rows visible · {weeks.length} weeks · {rows.length} SKU-locations</span>
         <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+          {onToggleHistory && (
+            <button
+              onClick={onToggleHistory}
+              style={{
+                ...btnStyle,
+                background: showHistory ? 'var(--navy-accent)' : 'var(--bg)',
+                color: showHistory ? 'white' : 'var(--text-2)',
+                border: showHistory ? '0.5px solid var(--navy-accent)' : '0.5px solid var(--border)',
+              }}
+            >
+              {showHistory ? 'Hide History' : 'Show History'}
+            </button>
+          )}
           <button onClick={expandAll}   style={btnStyle}>Expand All</button>
           <button onClick={collapseAll} style={btnStyle}>Collapse All</button>
         </span>
@@ -503,11 +529,11 @@ export default function DemandGrid({
                   width: COL_W, flexShrink: 0,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontSize: 10, fontWeight: 700, letterSpacing: '0.3px',
-                  color: w >= editableFrom ? 'var(--navy-accent)' : 'var(--text-3)',
-                  background: w >= editableFrom ? '#EFF6FF' : '#F8FAFC',
+                  color: w === 24 ? 'white' : w >= editableFrom ? 'var(--navy-accent)' : 'var(--text-3)',
+                  background: w === 24 ? 'var(--navy-accent)' : w >= editableFrom ? '#EFF6FF' : '#F8FAFC',
                   borderRight: '1px solid var(--border)',
                 }}>
-                  W{w}
+                  {toRelWeekShort(w)}
                 </div>
               ))}
             </div>

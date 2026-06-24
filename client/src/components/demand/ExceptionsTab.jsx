@@ -20,6 +20,12 @@ import { getStatusConfig } from '../../utils/statusConfig';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+function toRelWeek(w) {
+  if (w < 24)   return `W${w}`;
+  if (w === 24) return 'Current Week';
+  return `Week +${w - 24}`;
+}
+
 function fmtINR(v) {
   if (v == null || v === 0) return '—';
   if (v >= 1e7) return `₹${(v / 1e7).toFixed(1)} Cr`;
@@ -58,7 +64,7 @@ function CategoryChip({ label, count, isActive, meta, onClick }) {
 
 // ── Single exception card ─────────────────────────────────────────────────────
 
-function ExceptionCard({ exception: exc, onAcknowledge, isAcknowledging }) {
+function ExceptionCard({ exception: exc }) {
   const sc      = getStatusConfig(SEVERITY_STATUS[exc.severity] || 'neutral');
   const catMeta = CATEGORY_META[exc.category] || { label: exc.category, bg: '#F3F4F6', color: '#6B7280' };
 
@@ -95,7 +101,7 @@ function ExceptionCard({ exception: exc, onAcknowledge, isAcknowledging }) {
 
           {/* Week reference */}
           <span style={{ fontSize: 10, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>
-            W{exc.weekNumber} · {exc.year}
+            {toRelWeek(exc.weekNumber)}
           </span>
 
           {/* Financial impact */}
@@ -104,23 +110,6 @@ function ExceptionCard({ exception: exc, onAcknowledge, isAcknowledging }) {
           }}>
             {fmtINR(exc.financialImpact)}
           </span>
-
-          {/* Acknowledge button */}
-          <button
-            onClick={() => !isAcknowledging && onAcknowledge(exc.exceptionId)}
-            disabled={isAcknowledging}
-            style={{
-              fontSize: 10, fontWeight: 700, padding: '4px 11px', borderRadius: 6,
-              border: `1px solid ${sc.color}40`,
-              background: isAcknowledging ? 'var(--bg)' : sc.bg,
-              color: sc.color,
-              cursor: isAcknowledging ? 'default' : 'pointer',
-              opacity: isAcknowledging ? 0.6 : 1,
-              transition: 'opacity 0.15s', whiteSpace: 'nowrap',
-            }}
-          >
-            {isAcknowledging ? 'Acknowledging…' : 'Acknowledge'}
-          </button>
         </div>
 
         {/* Title */}
@@ -156,9 +145,8 @@ function ExceptionCard({ exception: exc, onAcknowledge, isAcknowledging }) {
 
 // ── ExceptionsTab ─────────────────────────────────────────────────────────────
 
-export default function ExceptionsTab({ data, loading, onAcknowledge }) {
+export default function ExceptionsTab({ data, loading }) {
   const [selectedCategory, setSelectedCategory] = useState('');
-  const [acknowledging,    setAcknowledging]    = useState(new Set());
 
   // Compute summary counts from live exceptions array so they auto-update after acknowledge
   const summary = useMemo(() => {
@@ -177,17 +165,6 @@ export default function ExceptionsTab({ data, loading, onAcknowledge }) {
     if (!selectedCategory) return excs;
     return excs.filter(e => e.category === selectedCategory);
   }, [data?.exceptions, selectedCategory]);
-
-  const handleAcknowledge = async (exceptionId) => {
-    setAcknowledging(prev => new Set([...prev, exceptionId]));
-    try {
-      await onAcknowledge(exceptionId);
-      // Parent removes the exception from data; component re-renders without the card.
-      // No need to manually remove from acknowledging set — the card unmounts.
-    } catch {
-      setAcknowledging(prev => { const s = new Set(prev); s.delete(exceptionId); return s; });
-    }
-  };
 
   // ── Loading state ───────────────────────────────────────────────────────────
 
@@ -216,7 +193,7 @@ export default function ExceptionsTab({ data, loading, onAcknowledge }) {
           No open exceptions
         </span>
         <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
-          All exceptions have been acknowledged
+          No active exceptions
         </span>
       </div>
     );
@@ -295,8 +272,6 @@ export default function ExceptionsTab({ data, loading, onAcknowledge }) {
         <ExceptionCard
           key={exc.exceptionId}
           exception={exc}
-          onAcknowledge={handleAcknowledge}
-          isAcknowledging={acknowledging.has(exc.exceptionId)}
         />
       ))}
     </div>
