@@ -1,16 +1,18 @@
 /**
  * DemandPlanning — unified demand planning workbench.
  *
- * Step A.3.1: Workbench shell + Forecast Grid tab.
+ * Step A.3.2: Patterns tab added alongside Forecast Grid.
  * - Top KPI bar (8 KPIs from /api/demand-planning/kpis)
  * - Filter row (location / product group / SKU / ABC / XYZ)
- * - 5-tab navigation; only Forecast Grid renders content this step
+ * - 5-tab navigation; Forecast Grid + Patterns tabs are live
  * - DemandGrid wired to /api/demand-planning/grid with PATCH on cell edit
+ * - Tabs use display:none (not unmount) so Grid scroll/expand state is preserved
  */
 import React, {
   useState, useEffect, useRef, useLayoutEffect, useCallback,
 } from 'react';
 import DemandGrid from '../components/demand/DemandGrid';
+import PatternsTab from '../components/demand/PatternsTab';
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 
@@ -56,6 +58,18 @@ async function fetchAllGridPages(filters) {
     for (const d of rest) all.push(...d.rows);
   }
   return { rows: all, weeks: d1.weeks, editableFrom: d1.weekRange?.editableFrom ?? 27 };
+}
+
+async function fetchPatterns(filters) {
+  const p = new URLSearchParams();
+  if (filters.locationId) p.set('locationId', filters.locationId);
+  if (filters.skuFamily)  p.set('skuFamily',  filters.skuFamily);
+  if (filters.sku)        p.set('sku',         filters.sku);
+  if (filters.abcClass)   p.set('abcClass',    filters.abcClass);
+  if (filters.xyzClass)   p.set('xyzClass',    filters.xyzClass);
+  const r = await fetch(`/api/demand-planning/patterns?${p}`);
+  if (!r.ok) throw new Error(`patterns ${r.status}`);
+  return r.json();
 }
 
 // ── KPI bar ───────────────────────────────────────────────────────────────────
@@ -215,7 +229,7 @@ function DemandFilterBar({ filters, onChange, options }) {
 
 const TABS = [
   { id: 'grid',       label: 'Forecast Grid',    active: true  },
-  { id: 'patterns',   label: 'Patterns',         active: false },
+  { id: 'patterns',   label: 'Patterns',         active: true  },
   { id: 'whatif',     label: 'What-If',          active: false },
   { id: 'exceptions', label: 'Exceptions',       active: false },
   { id: 'npi',        label: 'NPI Forecasting',  active: false },
@@ -294,6 +308,9 @@ export default function DemandPlanning() {
   const [editableFrom, setEditableFrom] = useState(27);
   const [activeTab,  setActiveTab]  = useState('grid');
   const [error,      setError]      = useState(null);
+  const [patternsData,    setPatternsData]    = useState(null);
+  const [patternsLoading, setPatternsLoading] = useState(false);
+  const [recalculating,   setRecalculating]   = useState(false);
 
   const gridContainerRef = useRef();
   const [gridDims, setGridDims] = useState({ height: 500, width: 900 });
@@ -359,6 +376,32 @@ export default function DemandPlanning() {
       .then(data => setKpis(data.kpis))
       .catch(() => {})
       .finally(() => setKpiLoading(false));
+  }, [filters]);
+
+  // Fetch patterns data when Patterns tab is active (or when filters change while on it)
+  const loadPatterns = useCallback(() => {
+    setPatternsLoading(true);
+    fetchPatterns(filters)
+      .then(d => setPatternsData(d))
+      .catch(() => setPatternsData(null))
+      .finally(() => setPatternsLoading(false));
+  }, [filters]);
+
+  useEffect(() => {
+    if (activeTab !== 'patterns') return;
+    loadPatterns();
+  }, [activeTab, loadPatterns]);
+
+  const handleRecalculate = useCallback(async () => {
+    setRecalculating(true);
+    try {
+      await fetch('/api/demand-planning/patterns/recalculate-classification', { method: 'POST' });
+      await new Promise(resolve => {
+        fetchPatterns(filters).then(d => { setPatternsData(d); resolve(); }).catch(() => resolve());
+      });
+    } finally {
+      setRecalculating(false);
+    }
   }, [filters]);
 
   const handleCellEdit = useCallback(async ({ row, week, newValue }) => {
@@ -431,29 +474,49 @@ export default function DemandPlanning() {
       {/* Tab navigation */}
       <TabBar activeTab={activeTab} onSelect={setActiveTab} />
 
-      {/* Tab content */}
-      {activeTab === 'grid' ? (
-        <div
-          ref={gridContainerRef}
-          style={{ flex: 1, minHeight: 0, padding: '12px', boxSizing: 'border-box', overflow: 'hidden' }}
-        >
-          {error ? (
-            <div style={{ color: '#DC2626', fontSize: 13, padding: 16 }}>
-              Failed to load grid: {error}
-            </div>
-          ) : (
-            <DemandGrid
-              rows={gridRows}
-              weeks={gridWeeks}
-              editableFrom={editableFrom}
-              onCellEdit={handleCellEdit}
-              loading={gridLoading}
-              height={gridDims.height}
-              width={gridDims.width}
-            />
-          )}
-        </div>
-      ) : (
+      {/* Forecast Grid tab — always mounted; display:none preserves react-window scroll/expand state */}
+      <div
+        ref={gridContainerRef}
+        style={{
+          flex: 1, minHeight: 0, padding: '12px',
+          boxSizing: 'border-box', overflow: 'hidden',
+          display: activeTab === 'grid' ? 'flex' : 'none',
+          flexDirection: 'column',
+        }}
+      >
+        {error ? (
+          <div style={{ color: '#DC2626', fontSize: 13, padding: 16 }}>
+            Failed to load grid: {error}
+          </div>
+        ) : (
+          <DemandGrid
+            rows={gridRows}
+            weeks={gridWeeks}
+            editableFrom={editableFrom}
+            onCellEdit={handleCellEdit}
+            loading={gridLoading}
+            height={gridDims.height}
+            width={gridDims.width}
+          />
+        )}
+      </div>
+
+      {/* Patterns tab — always mounted; display:none so it doesn't re-fetch on every switch */}
+      <div style={{
+        flex: 1, minHeight: 0, overflowY: 'auto',
+        display: activeTab === 'patterns' ? 'flex' : 'none',
+        flexDirection: 'column',
+      }}>
+        <PatternsTab
+          data={patternsData}
+          loading={patternsLoading}
+          onRecalculate={handleRecalculate}
+          recalculating={recalculating}
+        />
+      </div>
+
+      {/* Placeholder tabs for not-yet-built tabs */}
+      {['whatif', 'exceptions', 'npi'].includes(activeTab) && (
         <PlaceholderTab label={TABS.find(t => t.id === activeTab)?.label || activeTab} />
       )}
     </div>

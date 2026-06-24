@@ -442,25 +442,44 @@ router.get('/patterns', (req, res) => {
       ORDER BY category, sku
     `).all();
 
-    // Classify each SKU and collect results
+    // Classify each SKU and collect results (always from full portfolio — needed for table patternType)
     const classificationBySku = {};
     for (const pm of pmAll) {
       const weekly = skuWeekly[pm.sku] || [];
       classificationBySku[pm.sku] = classifyPattern(weekly);
     }
 
+    // Apply SKU-level filters to determine which SKUs appear in bar chart + scatter.
+    // locationId is intentionally NOT applied here — pattern classification is per-SKU,
+    // not per-location, so filtering by branch would give a misleading classification count.
+    let visiblePm = pmAll;
+    if (req.query.skuFamily && SKU_FAMILIES[req.query.skuFamily]) {
+      const allowed = new Set(SKU_FAMILIES[req.query.skuFamily]);
+      visiblePm = visiblePm.filter(pm => allowed.has(pm.sku));
+    }
+    if (req.query.sku) {
+      visiblePm = visiblePm.filter(pm => pm.sku === req.query.sku);
+    }
+    if (req.query.abcClass) {
+      visiblePm = visiblePm.filter(pm => pm.abcClass === req.query.abcClass);
+    }
+    if (req.query.xyzClass) {
+      visiblePm = visiblePm.filter(pm => pm.xyzClass === req.query.xyzClass);
+    }
+
     // ── classificationDistribution ───────────────────────────────────────
     const counts = { Seasonal: 0, Trend: 0, Random: 0, Stable: 0 };
-    for (const { patternType } of Object.values(classificationBySku)) {
-      if (counts[patternType] !== undefined) counts[patternType]++;
+    for (const pm of visiblePm) {
+      const { patternType } = classificationBySku[pm.sku] || {};
+      if (patternType && counts[patternType] !== undefined) counts[patternType]++;
     }
 
     const classificationDistribution = {
       counts,
-      total: pmAll.length,
+      total: visiblePm.length,
       methodology:
         'Seasonal = H1/H2 demand ratio > 2.0; Trend = |regression slope| > 5% of mean/week; Random = CoV ≥ 0.5 and not Seasonal; Stable = remainder. Computed from national weekly totals (SUM across 8 locations) in demand_weekly_data.',
-      bySku: pmAll.map(pm => ({
+      bySku: visiblePm.map(pm => ({
         sku:            pm.sku,
         patternType:    classificationBySku[pm.sku].patternType,
         h1h2Ratio:      classificationBySku[pm.sku].h1h2Ratio,
@@ -470,7 +489,7 @@ router.get('/patterns', (req, res) => {
     };
 
     // ── scatter ───────────────────────────────────────────────────────────
-    const scatter = pmAll.map(pm => ({
+    const scatter = visiblePm.map(pm => ({
       sku:         pm.sku,
       category:    pm.category,
       abcClass:    pm.abcClass,
