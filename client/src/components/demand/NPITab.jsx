@@ -28,6 +28,7 @@ export default function NPITab() {
   const [selectedLfl,      setSelectedLfl]      = useState('');
   const [predecessorStats, setPredecessorStats] = useState(null);
   const [statsLoading,     setStatsLoading]     = useState(false);
+  const [statsError,       setStatsError]       = useState(null);
   const [generating,       setGenerating]       = useState(false);
   const [renovationReady,  setRenovationReady]  = useState(false);
   const [submitAttempted,  setSubmitAttempted]  = useState(false);
@@ -46,12 +47,23 @@ export default function NPITab() {
   // We query the NEW sku (not old) because the old predecessor has no rows
   // in demand_weekly_data — the LFL replacement is the demand baseline.
   useEffect(() => {
-    if (!selectedLflEntry?.new_sku) { setPredecessorStats(null); return; }
+    if (!selectedLflEntry?.new_sku) { setPredecessorStats(null); setStatsError(null); return; }
     setStatsLoading(true);
+    setStatsError(null);
     fetch(`/api/demand-planning/npi/predecessor-stats?sku=${encodeURIComponent(selectedLflEntry.new_sku)}`)
       .then(r => r.json())
-      .then(d => setPredecessorStats(d.error ? null : d))
-      .catch(() => setPredecessorStats(null))
+      .then(d => {
+        if (d.error) {
+          setPredecessorStats(null);
+          setStatsError(`Could not load demand stats for this predecessor — ${d.error}`);
+        } else {
+          setPredecessorStats(d);
+        }
+      })
+      .catch(() => {
+        setPredecessorStats(null);
+        setStatsError('Could not load demand stats for this predecessor — please try again');
+      })
       .finally(() => setStatsLoading(false));
   }, [selectedLflEntry?.new_sku]);
 
@@ -61,6 +73,7 @@ export default function NPITab() {
     setSubmitAttempted(false);
     setSelectedLfl('');
     setPredecessorStats(null);
+    setStatsError(null);
     setSaved(false);
   };
 
@@ -247,6 +260,7 @@ export default function NPITab() {
                 onChange={e => {
                   setSelectedLfl(e.target.value);
                   setRenovationReady(false);
+                  setStatsError(null);
                   setSaved(false);
                 }}
                 style={{
@@ -278,6 +292,15 @@ export default function NPITab() {
                   Avg monthly demand 2025: <strong>{predecessorStats.avgMonthlyUnits.toLocaleString('en-IN')} units</strong> ·
                   Opening inventory basis: <strong>{Math.round(predecessorStats.avgMonthlyUnits * 3 * 2.5).toLocaleString('en-IN')} units</strong>
                   {' '}(3-month avg × 2.5 buffer)
+                </div>
+              )}
+              {statsError && !statsLoading && (
+                <div style={{
+                  marginTop: 10, padding: '8px 12px', borderRadius: 8,
+                  background: '#FEF2F2', border: '0.5px solid #FECACA',
+                  fontSize: 11, color: '#DC2626',
+                }}>
+                  ⚠ {statsError}
                 </div>
               )}
               {statsLoading && (
