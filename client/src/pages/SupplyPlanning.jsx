@@ -8,7 +8,7 @@
  *   §3.4  Planning actions panel: 7 action types using ActionButton/simulatedAction
  */
 import React, {
-  useState, useEffect, useRef, useLayoutEffect, useCallback,
+  useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo,
 } from 'react';
 import {
   Layers, RefreshCw, AlertTriangle, ChevronDown, ChevronRight, Zap,
@@ -135,6 +135,49 @@ function SupplyKPIStrip({ kpis, loading }) {
   );
 }
 
+// ── Status-count breakdown row ────────────────────────────────────────────────
+
+const STATUS_CHIPS = [
+  { key: 'stockout',   label: 'Projected Stockout',  bg: '#FEE2E2', color: '#DC2626' },
+  { key: 'capacity',   label: 'Capacity Constraint', bg: '#FEF3C7', color: '#D97706' },
+  { key: 'material',   label: 'Material Shortage',   bg: '#FEF3C7', color: '#B45309' },
+  { key: 'lowBuffer',  label: 'Low Buffer',          bg: '#EFF6FF', color: '#1D4ED8' },
+  { key: 'excess',     label: 'Excess',              bg: '#F3E8FF', color: '#7C3AED' },
+  { key: 'onPlan',     label: 'On Plan',             bg: '#DCFCE7', color: '#16A34A' },
+];
+
+function StatusCountRow({ counts, loading }) {
+  return (
+    <div style={{
+      display: 'flex', flexShrink: 0, overflowX: 'auto',
+      background: 'var(--card)', borderBottom: '1px solid var(--border)',
+      padding: '5px 14px', gap: 8, alignItems: 'center',
+    }}>
+      <span style={{
+        fontSize: 9, fontWeight: 700, letterSpacing: '0.6px',
+        textTransform: 'uppercase', color: 'var(--text-3)',
+        flexShrink: 0, marginRight: 4,
+      }}>
+        SKU-Location Status
+      </span>
+      {STATUS_CHIPS.map(c => (
+        <div key={c.key} style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          padding: '3px 10px', borderRadius: 'var(--radius-xl)',
+          background: c.bg, flexShrink: 0,
+        }}>
+          <span style={{ fontSize: 14, fontWeight: 800, color: c.color, lineHeight: 1 }}>
+            {loading ? '…' : (counts?.[c.key] ?? 0)}
+          </span>
+          <span style={{ fontSize: 10, fontWeight: 600, color: c.color, whiteSpace: 'nowrap' }}>
+            {c.label}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── Filter bar (§3.1) ─────────────────────────────────────────────────────────
 
 function FilterBar({ options, filters, onChange }) {
@@ -242,11 +285,17 @@ function MeasureGroupTabs({ value, onChange, showActions, onToggleActions }) {
 
 // ── Actions panel (§3.4) ──────────────────────────────────────────────────────
 
-function ActionsPanel({ filterOptions, actionsMeta, metaError, filters, onActionComplete }) {
+function ActionsPanel({ filterOptions, actionsMeta, metaError, filters, onActionComplete, initialCtx }) {
   const [ctx, setCtx] = useState({
     sku: '', locationId: '', weekNumber: String(filters.weekStart || 22),
     plantId: '', lineId: '', componentId: '', supplierId: '',
   });
+
+  // Pre-fill sku + locationId when triggered from the Take Action button
+  useEffect(() => {
+    if (!initialCtx) return;
+    setCtx(prev => ({ ...prev, sku: initialCtx.sku, locationId: initialCtx.locationId }));
+  }, [initialCtx]);
   const [openSection, setOpenSection] = useState('increase');
   const [deltaQty,   setDeltaQty]   = useState(100);
   const [pullFrom,   setPullFrom]   = useState(filters.weekStart);
@@ -631,6 +680,7 @@ export default function SupplyPlanning() {
   const [recsLoading,     setRecsLoading]     = useState(false);
   const [recsKey,         setRecsKey]         = useState(0);
   const [constraintsKey,  setConstraintsKey]  = useState(0);
+  const [actionCtx,       setActionCtx]       = useState(null);
 
   const gridContainerRef = useRef();
   const [gridDims, setGridDims] = useState({ height: 500, width: 900 });
@@ -771,6 +821,54 @@ export default function SupplyPlanning() {
     setMainView('grid');
   }, []);
 
+  // Compute SKU-location status counts from raw grid rows (no extra fetch needed)
+  const statusCounts = useMemo(() => {
+    const counts = { stockout: 0, capacity: 0, material: 0, lowBuffer: 0, excess: 0, onPlan: 0 };
+    for (const row of rows) {
+      const ssWeeks = row.safetyStockWeeks ?? 0;
+      let hasStockout = false, hasCapacity = false, hasMaterial = false;
+      let hasLowBuffer = false, hasExcess = false;
+      for (const cell of Object.values(row.cells || {})) {
+        const fd = cell.forecastDemand ?? 0;
+        const ei = cell.endingInventory ?? 0;
+        if ((cell.shortageQty ?? 0) > 0)                                   hasStockout = true;
+        if ((cell.capacityRequired ?? 0) > (cell.capacityAvailable ?? 0))  hasCapacity = true;
+        if ((cell.materialAvailability ?? 999) < 7)                        hasMaterial = true;
+        if (ei < ssWeeks * fd)                                             hasLowBuffer = true;
+        if (fd > 0 && (ei / fd) * 7 > 90)                                 hasExcess = true;
+      }
+      if (hasStockout)        counts.stockout++;
+      else if (hasCapacity)   counts.capacity++;
+      else if (hasMaterial)   counts.material++;
+      else if (hasLowBuffer)  counts.lowBuffer++;
+      else if (hasExcess)     counts.excess++;
+      else                    counts.onPlan++;
+    }
+    return counts;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows]);
+
+  const handleTakeAction = useCallback((sku, locationId) => {
+    setShowActions(true);
+    setActionCtx({ sku: String(sku), locationId: String(locationId) });
+  }, []);
+
+  const handleResetComplete = useCallback(() => {
+    console.log('[RESET] handleResetComplete fired — clearing rows and switching to grid');
+    setRows([]);
+    setKpis(null);
+    setMainView('grid');
+    fetch('/api/supply/filters')
+      .then(r => r.json())
+      .then(data => {
+        console.log('[RESET] filters refetched — new baseline scenario_id:', (data.scenarios || []).find(sc => sc.action_type === 'BASELINE')?.scenario_id);
+        setFilterOptions(data);
+        const baseline = (data.scenarios || []).find(sc => sc.action_type === 'BASELINE');
+        if (baseline) setFilters(f => ({ ...f, scenarioId: baseline.scenario_id }));
+      })
+      .catch(err => console.error('[RESET] filters fetch failed:', err));
+  }, []);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 40px)', overflow: 'hidden' }}>
 
@@ -809,6 +907,9 @@ export default function SupplyPlanning() {
       {/* §3.2 KPI strip */}
       <SupplyKPIStrip kpis={kpis} loading={kpiLoading} />
 
+      {/* Status-count breakdown row */}
+      <StatusCountRow counts={statusCounts} loading={loading} />
+
       {/* Main view tabs */}
       <ViewTabs
         active={mainView}
@@ -834,6 +935,7 @@ export default function SupplyPlanning() {
                 rows={rows} weeks={weeks} measureGroup={measureGroup}
                 loading={loading} height={gridDims.height} width={gridDims.width}
                 onCellEdit={handleCellEdit}
+                onTakeAction={handleTakeAction}
               />
             </div>
             {showActions && (
@@ -843,6 +945,7 @@ export default function SupplyPlanning() {
                 metaError={metaError}
                 filters={filters}
                 onActionComplete={handleActionComplete}
+                initialCtx={actionCtx}
               />
             )}
           </div>
@@ -883,6 +986,7 @@ export default function SupplyPlanning() {
         <ScenarioSimulation
           filters={filters}
           onSwitchScenario={handleSwitchScenario}
+          onResetComplete={handleResetComplete}
         />
       )}
     </div>
@@ -1653,7 +1757,7 @@ const scLabel = {
   letterSpacing: '0.04em', color: 'var(--text-3)', marginBottom: 5,
 };
 
-function ScenarioSimulation({ filters, onSwitchScenario }) {
+function ScenarioSimulation({ filters, onSwitchScenario, onResetComplete }) {
   const [scenarios,  setScenarios]  = useState([]);
   const [sceLoading, setSceLoading] = useState(false);
   const [selected,   setSelected]   = useState([]);
@@ -1736,19 +1840,18 @@ function ScenarioSimulation({ filters, onSwitchScenario }) {
   const handleReset = async () => {
     setResetting(true);
     try {
+      console.log('[RESET] handleReset — calling POST /api/supply/reset');
       const r = await fetch('/api/supply/reset', { method: 'POST' });
+      console.log('[RESET] reset response status:', r.status, '— onResetComplete defined?', typeof onResetComplete);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       setConfirmReset(false);
       setSelected([]);
       setComparison(null);
       setCreatedId(null);
-      // Fetch new baseline ID and switch to it
-      const scR = await fetch(`/api/supply/scenarios?weekStart=${filters.weekStart}&weekEnd=${filters.weekEnd}`);
-      const scD = await scR.json();
-      const baseline = (scD.scenarios || []).find(s => s.action_type === 'BASELINE');
-      if (baseline) onSwitchScenario(baseline.scenario_id);
+      onResetComplete();
       setRefreshKey(k => k + 1);
     } catch (err) {
+      console.error('[RESET] error in handleReset:', err);
       alert(`Reset failed: ${err.message}`);
     } finally { setResetting(false); }
   };

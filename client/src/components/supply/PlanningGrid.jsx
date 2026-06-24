@@ -24,7 +24,7 @@ import React, {
   useState, useMemo, useRef, useCallback, memo, forwardRef, useLayoutEffect,
 } from 'react';
 import { FixedSizeList, FixedSizeGrid } from 'react-window';
-import { ChevronRight, ChevronDown } from 'lucide-react';
+import { ChevronRight, ChevronDown, Zap } from 'lucide-react';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -51,10 +51,12 @@ export const MEASURE_GROUPS = {
     accentColor: 'var(--green)',
     bgLight: '#F0FDF4',
     measures: [
-      { key: 'forecastDemand',     label: 'Demand',     fmt: 'int' },
-      { key: 'beginningInventory', label: 'Inventory',  fmt: 'int' },
-      { key: 'plannedProduction',  label: 'Production', fmt: 'int', editable: true },
-      { key: 'shortageQty',        label: 'Gap',        fmt: 'int' },
+      { key: 'forecastDemand',     label: 'Demand',      fmt: 'int' },
+      { key: 'beginningInventory', label: 'Inventory',   fmt: 'int' },
+      { key: 'plannedProduction',  label: 'Production',  fmt: 'int', editable: true },
+      { key: 'shortageQty',        label: 'Gap',         fmt: 'int' },
+      { key: 'gapVsSS',            label: 'Gap vs SS',   fmt: 'int' },
+      { key: 'daysOfCover',        label: 'DoC (days)',  fmt: 'dec1', noAgg: true },
     ],
   },
   constraints: {
@@ -94,6 +96,7 @@ function buildTree(apiRows, measureDefs) {
       sku, locationId, locationName, region,
       plantId, plantName,
       productionLineId, lineName,
+      safetyStockWeeks = 0,
       cells = {},
     } = apiRow;
 
@@ -121,6 +124,17 @@ function buildTree(apiRows, measureDefs) {
       const w = parseInt(wkStr, 10);
       const vals = {};
       for (const mk of measureKeys) vals[mk] = cell[mk] ?? 0;
+      // Derived measures — computed from raw cell fields, not present in API response
+      if ('gapVsSS' in vals) {
+        const fd = cell.forecastDemand ?? 0;
+        const ei = cell.endingInventory ?? 0;
+        vals.gapVsSS = ei - (safetyStockWeeks * fd);
+      }
+      if ('daysOfCover' in vals) {
+        const fd = cell.forecastDemand ?? 0;
+        const ei = cell.endingInventory ?? 0;
+        vals.daysOfCover = fd > 0 ? (ei / fd) * 7 : null;
+      }
       wmap[w] = vals;
     }
     leafData.set(lineKey, wmap);
@@ -266,6 +280,13 @@ function getCellHighlight(measureKey, value) {
     if (value < 7)  return '#FEE2E2';
     if (value < 14) return '#FEF3C7';
   }
+  if (measureKey === 'gapVsSS' && value != null && value < 0)
+    return '#FEE2E2';
+  if (measureKey === 'daysOfCover' && value != null) {
+    if (value < 7)  return '#FEE2E2';
+    if (value < 14) return '#FEF3C7';
+    if (value > 90) return '#EFF6FF';
+  }
   return null;
 }
 
@@ -280,7 +301,7 @@ const NoScrollOuter = forwardRef(({ style, ...rest }, ref) => (
 const LeftCell = memo(({ index, style, data }) => {
   const {
     flatRows, expandedSkus, expandedLocs, expandedPlants,
-    toggleSku, toggleLoc, togglePlant, accentColor,
+    toggleSku, toggleLoc, togglePlant, accentColor, onTakeAction,
   } = data;
 
   const row = flatRows[index];
@@ -333,7 +354,7 @@ const LeftCell = memo(({ index, style, data }) => {
       style={{
         ...style, background: rs.bg,
         display: 'flex', alignItems: 'center',
-        paddingLeft: indent, paddingRight: 8,
+        paddingLeft: indent, paddingRight: 6,
         borderBottom: '1px solid rgba(255,255,255,0.06)',
         cursor: onClick ? 'pointer' : 'default',
         userSelect: 'none', overflow: 'hidden',
@@ -347,9 +368,29 @@ const LeftCell = memo(({ index, style, data }) => {
       <span style={{
         fontSize: rs.fs, fontWeight: rs.fw, color: rs.fg,
         whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        flex: 1,
       }}>
         {label}
       </span>
+      {row.type === 'location' && onTakeAction && (
+        <button
+          onClick={e => { e.stopPropagation(); onTakeAction(row.sku, row.locId); }}
+          title="Take Action"
+          style={{
+            flexShrink: 0, marginLeft: 4,
+            background: 'rgba(255,255,255,0.15)',
+            border: '1px solid rgba(255,255,255,0.28)',
+            borderRadius: 4,
+            padding: '2px 4px',
+            cursor: 'pointer',
+            display: 'flex', alignItems: 'center',
+            color: 'rgba(255,255,255,0.82)',
+            lineHeight: 1,
+          }}
+        >
+          <Zap size={11} />
+        </button>
+      )}
     </div>
   );
 });
@@ -470,6 +511,7 @@ export default function PlanningGrid({
   weeks      = [],
   measureGroup = 'demand',
   onCellEdit,
+  onTakeAction,
   loading    = false,
   height     = 500,
   width      = 900,
@@ -595,9 +637,9 @@ export default function PlanningGrid({
   // ── Item data (stable references to prevent unnecessary re-renders) ────────
   const leftData = useMemo(() => ({
     flatRows, expandedSkus, expandedLocs, expandedPlants,
-    toggleSku, toggleLoc, togglePlant, accentColor,
+    toggleSku, toggleLoc, togglePlant, accentColor, onTakeAction,
   }), [flatRows, expandedSkus, expandedLocs, expandedPlants,
-       toggleSku, toggleLoc, togglePlant, accentColor]);
+       toggleSku, toggleLoc, togglePlant, accentColor, onTakeAction]);
 
   const rightData = useMemo(() => ({
     flatRows, weeks, tree, primaryMeasureKey, onBeginEdit: handleBeginEdit,

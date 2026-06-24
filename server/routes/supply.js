@@ -152,12 +152,14 @@ router.get('/grid', (req, res) => {
         l.name AS location_name, l.region,
         p.name AS plant_name,
         pl.line_category, pl.name AS line_name,
-        pm.category AS sku_family
+        pm.category AS sku_family,
+        COALESCE(spp.safety_stock_weeks, 1.5) AS safety_stock_weeks
       FROM planning_orders po
       JOIN locations l  ON po.location_id=l.location_id
       JOIN plants p     ON po.plant_id=p.plant_id
       JOIN production_lines pl ON po.production_line_id=pl.line_id
       JOIN product_master pm ON po.sku=pm.sku
+      LEFT JOIN sku_planning_params spp ON po.sku=spp.sku
       LEFT JOIN demand_weekly_data dwd
              ON dwd.sku=po.sku AND dwd.location_id=po.location_id AND dwd.week_number=po.week_number
       WHERE ${where}
@@ -176,6 +178,7 @@ router.get('/grid', (req, res) => {
           region: cell.region, plantId: cell.plant_id, plantName: cell.plant_name,
           lineCategory: cell.line_category, lineName: cell.line_name,
           productionLineId: cell.production_line_id,
+          safetyStockWeeks: cell.safety_stock_weeks,
           cells: {},
         });
       }
