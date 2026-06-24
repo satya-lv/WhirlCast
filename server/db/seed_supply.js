@@ -13,6 +13,11 @@
  * on_hand quantities for components are NOT hard-coded — they are derived from
  * actual planned_production volumes after the 52-week roll-forward is computed.
  * This ensures material_availability reflects real draw rates.
+ *
+ * Step B (demand-supply connection): demand input is now sourced from
+ * demand_weekly_data.final_consensus (system_forecast + planner_adjustment)
+ * via a JOIN inside seedSupply(). Formula-based getWeeklyDemand() remains as
+ * a fallback when demand_weekly_data is unavailable (e.g. fresh DB, tests).
  */
 const { getDb } = require('./schema');
 
@@ -177,8 +182,12 @@ const CUSTOMER_DATA = [
 
 // ── Phase 1: Pure in-memory computation ───────────────────────────────────
 // No DB operations. Returns planning rows + derived on_hand values.
+//
+// demandOverride: optional { sku: { branch: { week: finalConsensus } } }
+// When an entry is present it replaces getWeeklyDemand() for that cell.
+// This is populated from demand_weekly_data.final_consensus by seedSupply().
 
-function computeAllPlanning() {
+function computeAllPlanning(demandOverride) {
   const SKUS = Object.keys(FWD_BASE);
 
   // demand[sku][branch][week]
@@ -187,7 +196,9 @@ function computeAllPlanning() {
     demand[sku] = {};
     for (const b of BRANCHES) {
       demand[sku][b] = {};
-      for (let w=1;w<=52;w++) demand[sku][b][w] = getWeeklyDemand(sku,b,w);
+      for (let w=1;w<=52;w++) {
+        demand[sku][b][w] = demandOverride?.[sku]?.[b]?.[w] ?? getWeeklyDemand(sku,b,w);
+      }
     }
   }
 
@@ -335,32 +346,36 @@ function computeAllPlanning() {
 // ── Phase 2: DB operations ─────────────────────────────────────────────────
 
 function seedSupply(force = false) {
+  // Open DB first so we can check row count and later query demand_weekly_data.
+  const db = getDb();
+
   if (!force) {
-    const checkDb = getDb();
     let cnt = 0;
-    try { cnt = checkDb.prepare('SELECT COUNT(*) as c FROM planning_orders').get().c; } catch (_) {}
-    checkDb.close();
+    try { cnt = db.prepare('SELECT COUNT(*) as c FROM planning_orders').get().c; } catch (_) {}
     if (cnt > 0) {
       console.log('[seed_supply] planning_orders already has data — skipping seed.');
+      db.close();
       return;
     }
   }
 
-  // Compute everything before touching the DB
-  const { rows, computedOnHand, compDraw, quarterlyReceipt } = computeAllPlanning();
-
-  const db = getDb();
-
-  // Idempotent clear (children before parents)
+  // Idempotent clear (children before parents).
+  // locations is intentionally excluded: demand_weekly_data holds a FK reference to it,
+  // so deleting locations would violate that constraint on reset. Locations are stable
+  // master data; we INSERT OR IGNORE below to add any that are missing.
   for (const t of [
     'transfer_orders','purchase_orders','firm_production_orders',
     'planning_orders','scenario_supply_plans','plant_location_routing',
     'bom_lines','sku_planning_params','components','suppliers',
-    'work_centers','production_lines','plants','customers','locations',
+    'work_centers','production_lines','plants','customers',
   ]) db.exec(`DELETE FROM ${t}`);
 
-  // 1. Locations
-  const insLoc = db.prepare(`INSERT INTO locations (name,region,state) VALUES (?,?,?)`);
+  // ── Reference tables: inserted BEFORE computeAllPlanning so that the
+  //    demand_weekly_data JOIN (which references locations) works. ──────────
+
+  // 1. Locations — INSERT OR IGNORE so re-seeds don't collide with existing rows
+  //    (demand_weekly_data FKs to this table; we never delete it on reset).
+  const insLoc = db.prepare(`INSERT OR IGNORE INTO locations (name,region,state) VALUES (?,?,?)`);
   for (const l of LOCATION_DATA) insLoc.run(l.name,l.region,l.state);
   const locId = {};
   for (const r of db.prepare('SELECT location_id,name FROM locations').all()) locId[r.name]=r.location_id;
@@ -402,7 +417,31 @@ function seedSupply(force = false) {
   const suppId = {};
   for (const r of db.prepare('SELECT supplier_id,name FROM suppliers').all()) suppId[r.name]=r.supplier_id;
 
-  // 7. Components — with computed on_hand values
+  // ── Read real demand from demand_weekly_data ───────────────────────────
+  // Join with the just-inserted locations table to resolve location_id → branch name.
+  // No year filter: there is exactly one set of 4,160 rows (10 SKUs × 8 locations × 52 weeks).
+  // Falls back to formula demand gracefully if the table is absent or empty.
+  const demandOverride = {};
+  try {
+    const dwdRows = db.prepare(`
+      SELECT dwd.sku, l.name AS branch, dwd.week_number, dwd.final_consensus
+      FROM demand_weekly_data dwd
+      JOIN locations l ON dwd.location_id = l.location_id
+    `).all();
+    for (const r of dwdRows) {
+      if (!demandOverride[r.sku]) demandOverride[r.sku] = {};
+      if (!demandOverride[r.sku][r.branch]) demandOverride[r.sku][r.branch] = {};
+      demandOverride[r.sku][r.branch][r.week_number] = r.final_consensus;
+    }
+    console.log(`[seed_supply] Loaded ${dwdRows.length} demand rows from demand_weekly_data (final_consensus).`);
+  } catch (err) {
+    console.log(`[seed_supply] demand_weekly_data unavailable — using formula demand. (${err.message})`);
+  }
+
+  // ── Compute full 52-week roll-forward with real demand ─────────────────
+  const { rows, computedOnHand, compDraw, quarterlyReceipt } = computeAllPlanning(demandOverride);
+
+  // 7. Components — with on_hand derived from actual planned_production volumes
   const insComp = db.prepare(`INSERT INTO components (code,name,category,supplier_id,unit_cost,on_hand_qty,reorder_point) VALUES (?,?,?,?,?,?,?)`);
   for (const c of COMPONENT_DATA) {
     const oh  = computedOnHand[c.code] || 0;
