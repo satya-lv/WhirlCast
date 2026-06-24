@@ -13,7 +13,7 @@ import React, {
 import {
   Layers, RefreshCw, AlertTriangle, ChevronDown, ChevronRight, Zap,
   BarChart2, GitBranch, Activity, Inbox as InboxIcon,
-  Sliders, Plus, Trophy, ArrowRight, Trash2, CheckCircle,
+  Sliders, Plus, Trophy, ArrowRight, Trash2, CheckCircle, FlaskConical,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer,
@@ -955,6 +955,16 @@ export default function SupplyPlanning() {
       {/* §3.6 Constraint Dashboard */}
       {mainView === 'constraints' && (
         <ConstraintDashboard filters={filters} refreshKey={constraintsKey} />
+      )}
+
+      {/* What-If Simulator */}
+      {mainView === 'whatif' && (
+        <WhatIfTab
+          filters={filters}
+          filterOptions={filterOptions}
+          actionsMeta={actionsMeta}
+          onRefreshGrid={() => { refreshAll(); setConstraintsKey(k => k + 1); }}
+        />
       )}
 
       {/* §3.7 Pegging View */}
@@ -2284,6 +2294,7 @@ function ViewTabs({ active, onChange, recCount }) {
   const tabs = [
     { id: 'grid',            label: 'Planning Grid',    icon: Layers },
     { id: 'constraints',     label: 'Constraints',      icon: Activity },
+    { id: 'whatif',          label: 'What-If',          icon: FlaskConical },
     { id: 'pegging',         label: 'Pegging',          icon: GitBranch },
     { id: 'recommendations', label: 'Recommendations',  icon: BarChart2,  badge: recCount },
     { id: 'inbox',           label: 'Inbox',            icon: InboxIcon,  badge: recCount },
@@ -2338,3 +2349,421 @@ const s = {
     background: 'var(--card)', color: 'var(--text-1)',
   },
 };
+
+// ── What-If Simulator (multi-SKU lever simulation) ────────────────────────────
+
+function WhatIfTab({ filters, filterOptions, actionsMeta, onRefreshGrid }) {
+  const [lever, setLever]             = useState('add_overtime');
+  const [lp, setLp]                   = useState({
+    plantId: '', lineId: '', extraHoursPerWeek: 8,
+    newPlantId: '',
+    componentId: '', supplierId: '', qty: 500, newWeekDue: filters.weekStart,
+  });
+  const [filterAbc,  setFilterAbc]    = useState('');
+  const [filterXyz,  setFilterXyz]    = useState('');
+  const [filterSev,  setFilterSev]    = useState('');
+  const [candidates, setCandidates]   = useState([]);
+  const [candLoading, setCandLoading] = useState(false);
+  const [candError,  setCandError]    = useState(null);
+  const [selected,   setSelected]     = useState(new Set());
+  const [simResult,  setSimResult]    = useState(null);
+  const [simLoading, setSimLoading]   = useState(false);
+  const [simError,   setSimError]     = useState(null);
+  const [approvals,  setApprovals]    = useState({});
+  const [apprErrors, setApprErrors]   = useState({});
+
+  const linesForPlant = (pid) => (actionsMeta?.lines || []).filter(l => String(l.plant_id) === String(pid));
+
+  useEffect(() => {
+    setCandLoading(true); setCandError(null); setSimResult(null);
+    setSelected(new Set()); setApprovals({});
+    const qs = new URLSearchParams({
+      scenarioId: filters.scenarioId,
+      weekStart: filters.weekStart,
+      weekEnd: filters.weekEnd,
+    });
+    if (filterAbc) qs.set('abcClass', filterAbc);
+    if (filterXyz) qs.set('xyzClass', filterXyz);
+    if (filterSev) qs.set('severity', filterSev);
+    fetch(`/api/supply/whatif/candidates?${qs}`)
+      .then(r => r.json())
+      .then(d => setCandidates(d.candidates || []))
+      .catch(e => setCandError(e.message))
+      .finally(() => setCandLoading(false));
+  }, [filters.scenarioId, filters.weekStart, filters.weekEnd, filterAbc, filterXyz, filterSev]);
+
+  const toggleAll = () => {
+    if (selected.size === candidates.length) setSelected(new Set());
+    else setSelected(new Set(candidates.map(c => `${c.sku}|${c.location_id}`)));
+  };
+  const toggleRow = (key) => setSelected(prev => {
+    const next = new Set(prev);
+    next.has(key) ? next.delete(key) : next.add(key);
+    return next;
+  });
+
+  const buildSimParams = () => {
+    if (lever === 'add_overtime')      return { plantId: parseInt(lp.plantId), lineId: parseInt(lp.lineId), extraHoursPerWeek: lp.extraHoursPerWeek };
+    if (lever === 'change_plant')      return { newPlantId: parseInt(lp.newPlantId) };
+    if (lever === 'expedite_supplier') return { componentId: parseInt(lp.componentId), supplierId: parseInt(lp.supplierId), qty: lp.qty, newWeekDue: lp.newWeekDue };
+    return {};
+  };
+
+  const canSimulate = selected.size > 0 && (
+    (lever === 'add_overtime'      && lp.plantId && lp.lineId) ||
+    (lever === 'change_plant'      && lp.newPlantId) ||
+    (lever === 'expedite_supplier' && lp.componentId && lp.supplierId)
+  );
+
+  const handleSimulate = async () => {
+    if (!canSimulate) return;
+    setSimLoading(true); setSimError(null); setSimResult(null); setApprovals({});
+    const selections = candidates
+      .filter(c => selected.has(`${c.sku}|${c.location_id}`))
+      .map(c => ({ sku: c.sku, locationId: c.location_id }));
+    try {
+      const res = await fetch('/api/supply/whatif/simulate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lever, params: buildSimParams(), selections, scenarioId: filters.scenarioId, weekStart: filters.weekStart, weekEnd: filters.weekEnd }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error);
+      setSimResult(d);
+    } catch (e) {
+      setSimError(e.message);
+    } finally {
+      setSimLoading(false);
+    }
+  };
+
+  const handleApprove = async (row) => {
+    const key = `${row.sku}|${row.locationId}`;
+    setApprovals(a => ({ ...a, [key]: 'loading' }));
+    setApprErrors(e => { const n = { ...e }; delete n[key]; return n; });
+    try {
+      const res = await fetch('/api/supply/actions', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          actionType: lever, sku: row.sku, locationId: row.locationId,
+          weekNumber: filters.weekStart, scenarioId: filters.scenarioId,
+          params: buildSimParams(),
+        }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Action failed');
+      setApprovals(a => ({ ...a, [key]: 'approved' }));
+      if (onRefreshGrid) onRefreshGrid();
+    } catch (e) {
+      setApprovals(a => ({ ...a, [key]: 'error' }));
+      setApprErrors(er => ({ ...er, [key]: e.message }));
+    }
+  };
+
+  const SEV_CHIP = {
+    critical: { bg: '#FEE2E2', color: '#DC2626' },
+    high:     { bg: '#FEF3C7', color: '#D97706' },
+    low:      { bg: '#EFF6FF', color: '#1D4ED8' },
+  };
+  const fmtInt = v => v == null ? '—' : Math.round(v).toLocaleString();
+  const fmtPct = v => v == null ? '—' : `${v.toFixed(1)}%`;
+
+  const leverLabel = { add_overtime: 'Add Overtime', change_plant: 'Shift Production Location', expedite_supplier: 'Expedite Supplier' };
+
+  return (
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg)' }}>
+
+      {/* ── Config strip ── */}
+      <div style={{ padding: '12px 16px', background: 'var(--card)', borderBottom: '1px solid var(--border)', display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-end' }}>
+        <div>
+          <div style={s.label}>Lever</div>
+          <select value={lever} onChange={e => { setLever(e.target.value); setSimResult(null); setApprovals({}); }} style={{ ...s.input, minWidth: 190 }}>
+            <option value="add_overtime">Add Overtime</option>
+            <option value="change_plant">Shift Production Location</option>
+            <option value="expedite_supplier">Expedite Supplier</option>
+          </select>
+        </div>
+
+        {lever === 'add_overtime' && (<>
+          <div>
+            <div style={s.label}>Plant</div>
+            <select value={lp.plantId} onChange={e => setLp(p => ({ ...p, plantId: e.target.value, lineId: '' }))} style={s.input}>
+              <option value="">Select plant…</option>
+              {(filterOptions?.plants || []).map(p => <option key={p.plant_id} value={p.plant_id}>{p.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={s.label}>Line</div>
+            <select value={lp.lineId} onChange={e => setLp(p => ({ ...p, lineId: e.target.value }))} style={s.input} disabled={!lp.plantId}>
+              <option value="">Select line…</option>
+              {linesForPlant(lp.plantId).map(l => <option key={l.line_id} value={l.line_id}>{l.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={s.label}>Extra hrs/week</div>
+            <input type="number" min={1} max={24} value={lp.extraHoursPerWeek}
+              onChange={e => setLp(p => ({ ...p, extraHoursPerWeek: parseFloat(e.target.value) || 8 }))}
+              style={{ ...s.input, width: 72 }} />
+          </div>
+        </>)}
+
+        {lever === 'change_plant' && (
+          <div>
+            <div style={s.label}>New Plant</div>
+            <select value={lp.newPlantId} onChange={e => setLp(p => ({ ...p, newPlantId: e.target.value }))} style={s.input}>
+              <option value="">Select plant…</option>
+              {(filterOptions?.plants || []).map(p => <option key={p.plant_id} value={p.plant_id}>{p.name}</option>)}
+            </select>
+          </div>
+        )}
+
+        {lever === 'expedite_supplier' && (<>
+          <div>
+            <div style={s.label}>Component</div>
+            <select value={lp.componentId} onChange={e => setLp(p => ({ ...p, componentId: e.target.value }))} style={{ ...s.input, maxWidth: 200 }}>
+              <option value="">Select component…</option>
+              {(actionsMeta?.components || []).map(c => <option key={c.component_id} value={c.component_id}>{c.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={s.label}>Supplier</div>
+            <select value={lp.supplierId} onChange={e => setLp(p => ({ ...p, supplierId: e.target.value }))} style={s.input}>
+              <option value="">Select supplier…</option>
+              {(actionsMeta?.suppliers || []).map(sv => <option key={sv.supplier_id} value={sv.supplier_id}>{sv.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={s.label}>Qty</div>
+            <input type="number" min={1} value={lp.qty}
+              onChange={e => setLp(p => ({ ...p, qty: parseInt(e.target.value) || 500 }))}
+              style={{ ...s.input, width: 80 }} />
+          </div>
+          <div>
+            <div style={s.label}>Week Due</div>
+            <input type="number" min={1} max={52} value={lp.newWeekDue}
+              onChange={e => setLp(p => ({ ...p, newWeekDue: parseInt(e.target.value) || filters.weekStart }))}
+              style={{ ...s.input, width: 64 }} />
+          </div>
+        </>)}
+
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', alignSelf: 'flex-end', gap: 4 }}>
+          <button
+            onClick={handleSimulate}
+            disabled={!canSimulate || simLoading}
+            style={{
+              padding: '6px 18px', borderRadius: 7, border: 'none', fontSize: 12, fontWeight: 700,
+              cursor: canSimulate && !simLoading ? 'pointer' : 'not-allowed',
+              background: canSimulate && !simLoading ? 'var(--navy-accent)' : 'var(--border)',
+              color: canSimulate && !simLoading ? 'white' : 'var(--text-3)',
+            }}>
+            {simLoading ? 'Simulating…' : `Simulate (${selected.size} SKU${selected.size !== 1 ? 's' : ''})`}
+          </button>
+          {!canSimulate && !simLoading && (() => {
+            if (selected.size === 0) return <span style={{ fontSize: 11, color: 'var(--text-3)' }}>Select SKU-locations below first</span>;
+            if (lever === 'add_overtime')      return <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{!lp.plantId ? 'Choose a plant and line above' : 'Choose a production line above'}</span>;
+            if (lever === 'change_plant')      return <span style={{ fontSize: 11, color: 'var(--text-3)' }}>Choose a new plant above</span>;
+            if (lever === 'expedite_supplier') return <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{!lp.componentId ? 'Choose a component and supplier above' : 'Choose a supplier above'}</span>;
+            return null;
+          })()}
+        </div>
+      </div>
+
+      {/* ── Scrollable body ── */}
+      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+        {/* Filter row */}
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={s.label}>Filter:</span>
+          <select value={filterAbc} onChange={e => setFilterAbc(e.target.value)} style={s.input}>
+            <option value="">All ABC</option>
+            {['A', 'B', 'C'].map(v => <option key={v} value={v}>ABC: {v}</option>)}
+          </select>
+          <select value={filterXyz} onChange={e => setFilterXyz(e.target.value)} style={s.input}>
+            <option value="">All XYZ</option>
+            {['X', 'Y', 'Z'].map(v => <option key={v} value={v}>XYZ: {v}</option>)}
+          </select>
+          <select value={filterSev} onChange={e => setFilterSev(e.target.value)} style={s.input}>
+            <option value="">All Severity</option>
+            <option value="critical">Critical (&gt;30%)</option>
+            <option value="high">High (10–30%)</option>
+            <option value="low">Low (&lt;10%)</option>
+          </select>
+          {(filterAbc || filterXyz || filterSev) && (
+            <button onClick={() => { setFilterAbc(''); setFilterXyz(''); setFilterSev(''); }}
+              style={{ fontSize: 11, padding: '3px 8px', border: '1px solid var(--border)', borderRadius: 6, background: 'transparent', color: 'var(--text-2)', cursor: 'pointer' }}>
+              Clear filters
+            </button>
+          )}
+          <span style={{ fontSize: 11, color: 'var(--text-3)', marginLeft: 'auto' }}>
+            {candLoading ? 'Loading…' : `${candidates.length} SKU-location${candidates.length !== 1 ? 's' : ''} with shortage`}
+          </span>
+        </div>
+
+        {/* Candidates table */}
+        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'auto' }}>
+          <div style={{ display: 'flex', alignItems: 'center', padding: '7px 12px', borderBottom: '1px solid var(--border)', gap: 8, background: 'rgba(27,58,107,0.03)' }}>
+            <input type="checkbox"
+              checked={candidates.length > 0 && selected.size === candidates.length}
+              ref={el => { if (el) el.indeterminate = selected.size > 0 && selected.size < candidates.length; }}
+              onChange={toggleAll} style={{ cursor: 'pointer' }} />
+            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)' }}>
+              {selected.size > 0 ? `${selected.size} selected — configure lever above then click Simulate` : 'Select SKU-locations to simulate'}
+            </span>
+          </div>
+          {candError && <div style={{ padding: 12, color: 'var(--danger)', fontSize: 12 }}>{candError}</div>}
+          {!candError && !candLoading && candidates.length === 0 && (
+            <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>
+              No shortages found for the current filters and week range
+            </div>
+          )}
+          {candidates.length > 0 && (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr style={{ background: 'rgba(27,58,107,0.04)' }}>
+                    <th style={{ width: 36, padding: '6px 8px' }} />
+                    {['SKU', 'Location', 'Plant / Line', 'ABC', 'XYZ', 'Shortage', 'Severity'].map(h => (
+                      <th key={h} style={{ padding: '6px 10px', textAlign: 'left', fontSize: 10, fontWeight: 700, letterSpacing: '0.4px', textTransform: 'uppercase', color: 'var(--text-3)', whiteSpace: 'nowrap' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {candidates.map((c, i) => {
+                    const key  = `${c.sku}|${c.location_id}`;
+                    const isSel = selected.has(key);
+                    const chip  = SEV_CHIP[c.severity] || SEV_CHIP.low;
+                    return (
+                      <tr key={key} onClick={() => toggleRow(key)}
+                        style={{ cursor: 'pointer', borderBottom: '1px solid var(--border)', background: isSel ? 'rgba(27,58,107,0.06)' : i % 2 ? 'rgba(0,0,0,0.015)' : 'transparent' }}>
+                        <td style={{ padding: '6px 8px', textAlign: 'center' }}>
+                          <input type="checkbox" checked={isSel} onChange={() => toggleRow(key)} onClick={e => e.stopPropagation()} />
+                        </td>
+                        <td style={{ padding: '6px 10px', fontWeight: 600, color: 'var(--text-1)', whiteSpace: 'nowrap' }}>{c.sku}</td>
+                        <td style={{ padding: '6px 10px', color: 'var(--text-2)', whiteSpace: 'nowrap' }}>{c.location_name}</td>
+                        <td style={{ padding: '6px 10px', color: 'var(--text-2)', fontSize: 11, whiteSpace: 'nowrap' }}>{c.plant_name} / {c.line_name}</td>
+                        <td style={{ padding: '6px 10px', textAlign: 'center' }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 7px', borderRadius: 5, background: 'rgba(27,58,107,0.1)', color: 'var(--navy-accent)' }}>{c.abc_class}</span>
+                        </td>
+                        <td style={{ padding: '6px 10px', textAlign: 'center' }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 7px', borderRadius: 5, background: 'rgba(124,58,237,0.08)', color: '#7C3AED' }}>{c.xyz_class}</span>
+                        </td>
+                        <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 600, color: 'var(--danger)' }}>{fmtInt(c.total_shortage)}</td>
+                        <td style={{ padding: '6px 10px' }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 99, background: chip.bg, color: chip.color }}>
+                            {c.severity} ({c.severityPct}%)
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Simulation error */}
+        {simError && (
+          <div style={{ padding: '10px 14px', background: '#FEE2E2', border: '1px solid #FECACA', borderRadius: 8, color: '#DC2626', fontSize: 12 }}>
+            Simulation error: {simError}
+          </div>
+        )}
+
+        {/* Results panel */}
+        {simResult && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+            {/* Summary bar */}
+            <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 18px' }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)', marginBottom: 12 }}>
+                Simulation Results — {leverLabel[lever]}
+                <span style={{ marginLeft: 10, fontSize: 11, fontWeight: 500, color: 'var(--text-3)' }}>W{simResult.weekRange.start}–W{simResult.weekRange.end}</span>
+              </div>
+              <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap' }}>
+                {[
+                  { label: 'Total Gap Before',  value: fmtInt(simResult.summary.totalGapBefore),  color: 'var(--danger)' },
+                  { label: 'Total Gap After',   value: fmtInt(simResult.summary.totalGapAfter),   color: simResult.summary.gapReduction > 0 ? 'var(--green)' : 'var(--danger)' },
+                  { label: 'Gap Reduction',     value: fmtInt(simResult.summary.gapReduction),    color: simResult.summary.gapReduction > 0 ? 'var(--green)' : 'var(--text-3)' },
+                  { label: 'SKUs Improved',     value: `${simResult.summary.skusImproved} / ${simResult.rows.length}`, color: 'var(--navy-accent)' },
+                  { label: 'Est. Cost Impact',  value: `₹${simResult.summary.totalCostImpact.toLocaleString()}`, color: 'var(--amber)' },
+                ].map(m => (
+                  <div key={m.label} style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.4px', textTransform: 'uppercase', color: 'var(--text-3)', marginBottom: 4 }}>{m.label}</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: m.color }}>{m.value}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Per-SKU results table */}
+            <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ background: 'rgba(27,58,107,0.04)' }}>
+                      {['SKU', 'Location', 'Gap Before', 'Gap After', 'Reduction', 'Svc Lvl Before', 'Svc Lvl After', 'Est. Cost', 'Note', 'Action'].map(h => (
+                        <th key={h} style={{ padding: '7px 10px', textAlign: 'left', fontSize: 10, fontWeight: 700, letterSpacing: '0.4px', textTransform: 'uppercase', color: 'var(--text-3)', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {simResult.rows.map((row, i) => {
+                      const key     = `${row.sku}|${row.locationId}`;
+                      const apState = approvals[key] || 'idle';
+                      const apErr   = apprErrors[key];
+                      return (
+                        <tr key={key} style={{ borderBottom: '1px solid var(--border)', background: row.improved ? 'rgba(22,163,74,0.04)' : i % 2 ? 'rgba(0,0,0,0.015)' : 'transparent' }}>
+                          <td style={{ padding: '7px 10px', fontWeight: 600, color: 'var(--text-1)', whiteSpace: 'nowrap' }}>{row.sku}</td>
+                          <td style={{ padding: '7px 10px', color: 'var(--text-2)', whiteSpace: 'nowrap' }}>{row.locationName}</td>
+                          <td style={{ padding: '7px 10px', textAlign: 'right', color: 'var(--danger)', fontWeight: 600 }}>{fmtInt(row.before.totalShortage)}</td>
+                          <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 600, color: row.improved ? 'var(--green)' : 'var(--danger)' }}>{fmtInt(row.after.totalShortage)}</td>
+                          <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 700, color: row.gapReduction > 0 ? 'var(--green)' : 'var(--text-3)' }}>
+                            {row.gapReduction > 0 ? `-${fmtInt(row.gapReduction)}` : '—'}
+                          </td>
+                          <td style={{ padding: '7px 10px', textAlign: 'right', color: 'var(--text-2)' }}>{fmtPct(row.before.serviceLevel)}</td>
+                          <td style={{ padding: '7px 10px', textAlign: 'right', color: row.improved ? 'var(--green)' : 'var(--text-2)' }}>{fmtPct(row.after.serviceLevel)}</td>
+                          <td style={{ padding: '7px 10px', textAlign: 'right', color: 'var(--amber)', whiteSpace: 'nowrap' }}>
+                            {row.costImpact > 0 ? `₹${row.costImpact.toLocaleString()}` : '—'}
+                          </td>
+                          <td style={{ padding: '7px 10px', color: row.note ? (row.improved ? 'var(--text-2)' : 'var(--text-3)') : 'var(--text-3)', fontSize: 11, maxWidth: 220 }}>
+                            {row.note || ''}
+                          </td>
+                          <td style={{ padding: '7px 10px', whiteSpace: 'nowrap' }}>
+                            {apState === 'approved' ? (
+                              <span style={{ fontSize: 11, color: 'var(--green)', fontWeight: 700 }}>✓ Approved</span>
+                            ) : apState === 'error' ? (
+                              <div>
+                                <span style={{ fontSize: 11, color: 'var(--danger)', fontWeight: 600 }}>Failed</span>
+                                {apErr && <div style={{ fontSize: 10, color: 'var(--danger)', maxWidth: 160 }}>{apErr}</div>}
+                                <button onClick={() => handleApprove(row)}
+                                  style={{ fontSize: 10, padding: '2px 7px', borderRadius: 5, border: '1px solid var(--danger)', background: 'transparent', color: 'var(--danger)', cursor: 'pointer', marginTop: 3 }}>
+                                  Retry
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => handleApprove(row)}
+                                disabled={apState === 'loading' || !row.improved}
+                                style={{
+                                  fontSize: 11, padding: '4px 12px', borderRadius: 6, border: 'none', fontWeight: 700,
+                                  cursor: row.improved && apState !== 'loading' ? 'pointer' : 'not-allowed',
+                                  background: row.improved ? 'var(--navy-accent)' : 'var(--border)',
+                                  color: row.improved ? 'white' : 'var(--text-3)',
+                                }}>
+                                {apState === 'loading' ? '…' : row.improved ? 'Approve' : 'No benefit'}
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+}

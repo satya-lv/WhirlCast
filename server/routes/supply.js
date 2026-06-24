@@ -1131,6 +1131,260 @@ router.delete('/scenarios/:id', (req, res) => {
   }
 });
 
+// ── GET /api/supply/whatif/candidates ────────────────────────────────────────
+// SKU-locations with shortage_qty > 0, with ABC/XYZ/severity quick-filters.
+// Query params: scenarioId, weekStart, weekEnd, abcClass, xyzClass, severity
+
+router.get('/whatif/candidates', (req, res) => {
+  try {
+    const db         = getDb();
+    const scenarioId = parseInt(req.query.scenarioId) || getBaseline(db);
+    const { start, end } = weekRange(req.query);
+
+    const rows = db.prepare(`
+      SELECT po.sku, po.location_id,
+        l.name AS location_name, l.region,
+        pm.abc_class, pm.xyz_class, pm.category,
+        po.plant_id, po.production_line_id,
+        pl.name AS line_name, p.name AS plant_name,
+        SUM(po.shortage_qty)                            AS total_shortage,
+        SUM(po.forecast_demand)                         AS total_demand,
+        COUNT(*)                                        AS weeks_with_shortage,
+        MIN(po.material_availability)                   AS min_material_avail,
+        MAX(po.capacity_required - po.capacity_available) AS max_cap_overload
+      FROM planning_orders po
+      JOIN product_master     pm ON po.sku             = pm.sku
+      JOIN locations           l ON po.location_id     = l.location_id
+      JOIN plants              p ON po.plant_id        = p.plant_id
+      JOIN production_lines   pl ON po.production_line_id = pl.line_id
+      WHERE po.shortage_qty > 0
+        AND po.scenario_id = ?
+        AND po.year = 2026
+        AND po.week_number BETWEEN ? AND ?
+      GROUP BY po.sku, po.location_id, po.plant_id, po.production_line_id,
+               l.name, l.region, pm.abc_class, pm.xyz_class, pm.category,
+               pl.name, p.name
+      ORDER BY total_shortage DESC
+    `).all(scenarioId, start, end);
+
+    const { abcClass, xyzClass, severity } = req.query;
+    const candidates = rows
+      .map(r => {
+        const pct = r.total_demand > 0 ? r.total_shortage / r.total_demand : 0;
+        const sev = pct > 0.30 ? 'critical' : pct >= 0.10 ? 'high' : 'low';
+        return { ...r, severity: sev, severityPct: Math.round(pct * 100) };
+      })
+      .filter(r => {
+        if (abcClass && r.abc_class !== abcClass) return false;
+        if (xyzClass && r.xyz_class !== xyzClass) return false;
+        if (severity && r.severity !== severity)   return false;
+        return true;
+      });
+
+    db.close();
+    res.json({ scenarioId, weekRange: { start, end }, count: candidates.length, candidates });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/supply/whatif/simulate ─────────────────────────────────────────
+// Read-only lever simulation — reuses action math but makes NO DB writes.
+// Body: { lever, params, selections:[{sku,locationId}], scenarioId, weekStart, weekEnd }
+
+router.post('/whatif/simulate', (req, res) => {
+  try {
+    const db = getDb();
+    const {
+      lever, params = {}, selections = [],
+      scenarioId: rawSc, weekStart: rawWs, weekEnd: rawWe,
+    } = req.body;
+    if (!lever)            return res.status(400).json({ error: 'lever is required' });
+    if (!selections.length) return res.status(400).json({ error: 'at least one selection is required' });
+
+    const scenarioId = parseInt(rawSc) || getBaseline(db);
+    const start = Math.max(1,  parseInt(rawWs) || 22);
+    const end   = Math.min(52, parseInt(rawWe) || start + 12);
+
+    const hpuMap = Object.fromEntries(
+      db.prepare(`SELECT sku, hours_per_unit FROM sku_planning_params`).all()
+        .map(r => [r.sku, r.hours_per_unit || 0.4])
+    );
+
+    const rows = [];
+
+    for (const sel of selections) {
+      const sku   = sel.sku;
+      const locId = parseInt(sel.locationId);
+
+      const orders = db.prepare(`
+        SELECT po.*, spp.hours_per_unit, pm.abc_class, pm.xyz_class,
+          l.name AS location_name, p.name AS plant_name, pl.name AS line_name
+        FROM planning_orders po
+        JOIN sku_planning_params spp ON po.sku             = spp.sku
+        JOIN product_master       pm ON po.sku             = pm.sku
+        JOIN locations             l ON po.location_id     = l.location_id
+        JOIN plants                p ON po.plant_id        = p.plant_id
+        JOIN production_lines     pl ON po.production_line_id = pl.line_id
+        WHERE po.sku=? AND po.location_id=? AND po.scenario_id=?
+          AND po.year=2026 AND po.week_number BETWEEN ? AND ?
+        ORDER BY po.week_number
+      `).all(sku, locId, scenarioId, start, end);
+
+      if (!orders.length) {
+        rows.push({
+          sku, locationId: locId, locationName: '?', abcClass: '?', xyzClass: '?',
+          before: { totalShortage: 0, serviceLevel: 100 },
+          after:  { totalShortage: 0, serviceLevel: 100 },
+          gapReduction: 0, costImpact: 0, improved: false,
+          note: 'No planning data found for this selection',
+        });
+        continue;
+      }
+
+      const first         = orders[0];
+      const totalDemand   = orders.reduce((s, o) => s + (o.forecast_demand  || 0), 0);
+      const beforeShortage = orders.reduce((s, o) => s + (o.shortage_qty    || 0), 0);
+      const beforeSvcLvl  = totalDemand > 0
+        ? Math.round((1 - beforeShortage / totalDemand) * 1000) / 10 : 100;
+
+      let afterShortage = beforeShortage;
+      let costImpact    = 0;
+      let improved      = false;
+      let note          = null;
+
+      // ── Add Overtime ───────────────────────────────────────────────────────
+      if (lever === 'add_overtime') {
+        const pId = parseInt(params.plantId);
+        const lId = parseInt(params.lineId);
+        const hrs = parseFloat(params.extraHoursPerWeek) || 8;
+        const hpu = hpuMap[sku];
+
+        const onTargetLine = orders.some(o => o.plant_id === pId && o.production_line_id === lId);
+        if (!onTargetLine) {
+          note = `${sku} is not produced at the selected plant/line — overtime there has no effect here`;
+        } else {
+          let newTotal = 0;
+          let weeksHelped = 0;
+          let weeksMatConstr = 0;
+          for (const o of orders) {
+            if ((o.shortage_qty || 0) <= 0) continue;
+            if ((o.material_availability || 999) < 7) {
+              newTotal += o.shortage_qty;
+              weeksMatConstr++;
+            } else if ((o.capacity_required || 0) <= (o.capacity_available || 0)) {
+              newTotal += o.shortage_qty;
+            } else {
+              const extraUnits = hrs / hpu;
+              const newCap  = o.capacity_available + extraUnits;
+              const newProd = Math.min(newCap, o.planned_production + extraUnits);
+              newTotal += Math.max(0, o.forecast_demand - o.beginning_inventory - newProd);
+              weeksHelped++;
+            }
+          }
+          afterShortage = Math.round(newTotal * 10) / 10;
+          costImpact    = Math.round(hrs * weeksHelped * 500); // ₹500/overtime-hour
+          improved = afterShortage < beforeShortage;
+          if (!improved) {
+            note = weeksMatConstr > 0
+              ? `Material-constrained (${weeksMatConstr} wk${weeksMatConstr > 1 ? 's' : ''}) — overtime cannot address component shortage`
+              : `Not at capacity limit — shortage is not driven by line capacity`;
+          }
+        }
+      }
+
+      // ── Change Plant ───────────────────────────────────────────────────────
+      else if (lever === 'change_plant') {
+        const newPId       = parseInt(params.newPlantId);
+        const lineCategory = db.prepare(`SELECT line_category FROM sku_planning_params WHERE sku=?`).get(sku)?.line_category;
+        const newLine      = db.prepare(`
+          SELECT line_id, hours_per_shift, shifts_per_day, working_days_per_week
+          FROM production_lines WHERE plant_id=? AND line_category=? LIMIT 1
+        `).get(newPId, lineCategory);
+
+        if (!newLine) {
+          note = `New plant has no compatible production line for ${lineCategory || 'this SKU category'}`;
+        } else {
+          const hpu    = hpuMap[sku];
+          const newCap = (newLine.hours_per_shift * newLine.shifts_per_day * newLine.working_days_per_week) / hpu;
+          let newTotal = 0;
+          for (const o of orders) {
+            const newProd = Math.min(newCap, o.forecast_demand);
+            newTotal += Math.max(0, o.forecast_demand - o.beginning_inventory - newProd);
+          }
+          afterShortage = Math.round(newTotal * 10) / 10;
+          costImpact    = Math.round(Math.max(0, beforeShortage - newTotal) * 1000); // ₹1000/unit transferred
+          improved = afterShortage < beforeShortage;
+          if (!improved) {
+            const newPlantName = db.prepare(`SELECT name FROM plants WHERE plant_id=?`).get(newPId)?.name || `Plant ${newPId}`;
+            note = `Shifting to ${newPlantName} does not increase available capacity for this SKU`;
+          }
+        }
+      }
+
+      // ── Expedite Supplier ──────────────────────────────────────────────────
+      else if (lever === 'expedite_supplier') {
+        const cId     = parseInt(params.componentId);
+        const qty     = parseInt(params.qty) || 0;
+        const weekDue = parseInt(params.newWeekDue) || start;
+        const bomRow  = db.prepare(`SELECT qty_per FROM bom_lines WHERE sku=? AND component_id=?`).get(sku, cId);
+
+        if (!bomRow) {
+          note = `${sku} does not use this component — expediting has no direct effect`;
+        } else {
+          const comp   = db.prepare(`SELECT unit_cost FROM components WHERE component_id=?`).get(cId);
+          let newTotal = 0;
+          for (const o of orders) {
+            if (o.week_number >= weekDue && (o.shortage_qty || 0) > 0 && (o.material_availability || 999) < 14) {
+              const recoverable = Math.min(o.shortage_qty, qty / bomRow.qty_per);
+              newTotal += Math.max(0, o.shortage_qty - recoverable);
+            } else {
+              newTotal += (o.shortage_qty || 0);
+            }
+          }
+          afterShortage = Math.round(newTotal * 10) / 10;
+          costImpact    = Math.round(qty * (comp?.unit_cost || 1000) * 0.05); // 5% expedite premium
+          improved      = afterShortage < beforeShortage;
+          if (!improved) note = `Shortage in ${sku} is not driven by this component's availability`;
+        }
+      }
+
+      const afterSvcLvl = totalDemand > 0
+        ? Math.round((1 - afterShortage / totalDemand) * 1000) / 10 : 100;
+
+      rows.push({
+        sku, locationId: locId, locationName: first.location_name,
+        abcClass: first.abc_class, xyzClass: first.xyz_class,
+        plantId: first.plant_id,  plantName: first.plant_name,
+        lineId:  first.production_line_id, lineName: first.line_name,
+        before: { totalShortage: Math.round(beforeShortage * 10) / 10, serviceLevel: beforeSvcLvl },
+        after:  { totalShortage: Math.round(afterShortage  * 10) / 10, serviceLevel: afterSvcLvl  },
+        gapReduction: Math.round((beforeShortage - afterShortage) * 10) / 10,
+        costImpact, improved, note,
+      });
+    }
+
+    const totBefore = Math.round(rows.reduce((s, r) => s + r.before.totalShortage, 0) * 10) / 10;
+    const totAfter  = Math.round(rows.reduce((s, r) => s + r.after.totalShortage,  0) * 10) / 10;
+
+    db.close();
+    res.json({
+      lever, scenarioId, weekRange: { start, end },
+      summary: {
+        totalGapBefore:  totBefore,
+        totalGapAfter:   totAfter,
+        gapReduction:    Math.round((totBefore - totAfter) * 10) / 10,
+        skusImproved:    rows.filter(r => r.improved).length,
+        skusUnchanged:   rows.filter(r => !r.improved).length,
+        totalCostImpact: rows.reduce((s, r) => s + (r.costImpact || 0), 0),
+      },
+      rows,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── POST /api/supply/reset ─────────────────────────────────────────────────
 // Wipe all supply planning data and re-run the original seed script.
 // This restores the Baseline to its original state and deletes all other scenarios.
