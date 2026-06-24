@@ -1,4 +1,3 @@
-'use strict';
 import React, { useState, useEffect } from 'react';
 
 const MONTHS = ['Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov'];
