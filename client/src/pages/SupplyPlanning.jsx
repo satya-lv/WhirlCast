@@ -699,23 +699,16 @@ export default function SupplyPlanning() {
   const [actionsMeta,   setActionsMeta]   = useState(null);
   const [metaError,     setMetaError]     = useState(false);
   const navigate = useNavigate();
-  const { persona, setPersona } = usePersona();
+  const { persona, setPersona, activeView, setActiveView } = usePersona();
   const lockedFilter = getLockedFilter(persona?.role, 'supply');
 
-  // DEBUG — remove after diagnosis
-  console.log('[SUPPLY] persona:', persona?.role, '| lockedFilter:', lockedFilter);
-
-  const [filters, setFilters] = useState(() => {
-    const init = {
-      scenarioId: 1, weekStart: 24, weekEnd: 52,
-      region:     lockedFilter?.field === 'region'     ? lockedFilter.value : '',
-      locationId: lockedFilter?.field === 'locationId' ? lockedFilter.value : '',
-      skuFamily:  lockedFilter?.field === 'skuFamily'  ? lockedFilter.value : '',
-      plant: '', sku: '',
-    };
-    console.log('[SUPPLY] initial filters.locationId:', init.locationId, '| filters.skuFamily:', init.skuFamily);
-    return init;
-  });
+  const [filters, setFilters] = useState(() => ({
+    scenarioId: 1, weekStart: 24, weekEnd: 52,
+    region:     lockedFilter?.field === 'region'     ? lockedFilter.value : '',
+    locationId: lockedFilter?.field === 'locationId' ? lockedFilter.value : '',
+    skuFamily:  lockedFilter?.field === 'skuFamily'  ? lockedFilter.value : '',
+    plant: '', sku: '',
+  }));
   const [showHistory, setShowHistory] = useState(false);
 
   const handleToggleHistory = useCallback(() => {
@@ -733,12 +726,13 @@ export default function SupplyPlanning() {
   const [kpiLoading, setKpiLoading] = useState(false);
   const [measureGroup, setMeasureGroup] = useState('supply');
   const [showActions,  setShowActions]  = useState(false);
-  const [mainView,     setMainView]     = useState('grid');
   const [recommendations, setRecommendations] = useState(null);
   const [recsLoading,     setRecsLoading]     = useState(false);
   const [recsKey,         setRecsKey]         = useState(0);
   const [constraintsKey,  setConstraintsKey]  = useState(0);
   const [actionCtx,       setActionCtx]       = useState(null);
+
+  useEffect(() => { setActiveView('grid'); }, []);
 
   const gridContainerRef = useRef();
   const [gridDims, setGridDims] = useState({ height: 500, width: 900 });
@@ -820,8 +814,6 @@ export default function SupplyPlanning() {
       ...(filters.locationId && { locationId: String(filters.locationId) }),
       ...(filters.skuFamily  && { skuFamily:  filters.skuFamily }),
     });
-    // DEBUG — remove after diagnosis
-    console.log('[RECS FETCH]', `/api/supply/recommendations?${params}`);
     fetch(`/api/supply/recommendations?${params}`)
       .then(r => { if (!r.ok) throw new Error('recs'); return r.json(); })
       .then(data => { if (!cancelled) setRecommendations(data); })
@@ -881,7 +873,7 @@ export default function SupplyPlanning() {
 
   const handleSwitchScenario = useCallback((scenarioId) => {
     setFilters(f => ({ ...f, scenarioId }));
-    setMainView('grid');
+    setActiveView('grid');
   }, []);
 
   // Compute SKU-location status counts from raw grid rows (no extra fetch needed)
@@ -920,7 +912,7 @@ export default function SupplyPlanning() {
     console.log('[RESET] handleResetComplete fired — clearing rows and switching to grid');
     setRows([]);
     setKpis(null);
-    setMainView('grid');
+    setActiveView('grid');
     fetch('/api/supply/filters')
       .then(r => r.json())
       .then(data => {
@@ -978,15 +970,9 @@ export default function SupplyPlanning() {
       {/* Status-count breakdown row */}
       <StatusCountRow counts={statusCounts} loading={loading} />
 
-      {/* Main view tabs */}
-      <ViewTabs
-        active={mainView}
-        onChange={setMainView}
-        recCount={recommendations?.recommendations?.length ?? 0}
-      />
 
       {/* §3.3 Grid view + §3.4 Actions panel */}
-      {mainView === 'grid' && (
+      {activeView === 'grid' && (
         <>
           <MeasureGroupTabs
             value={measureGroup} onChange={setMeasureGroup}
@@ -1021,12 +1007,12 @@ export default function SupplyPlanning() {
       )}
 
       {/* §3.6 Constraint Dashboard */}
-      {mainView === 'constraints' && (
+      {activeView === 'constraints' && (
         <ConstraintDashboard filters={filters} refreshKey={constraintsKey} />
       )}
 
       {/* What-If Simulator */}
-      {mainView === 'whatif' && (
+      {activeView === 'whatif' && (
         <WhatIfTab
           filters={filters}
           filterOptions={filterOptions}
@@ -1036,12 +1022,12 @@ export default function SupplyPlanning() {
       )}
 
       {/* §3.7 Pegging View */}
-      {mainView === 'pegging' && (
+      {activeView === 'pegging' && (
         <PeggingView filters={filters} filterOptions={filterOptions} />
       )}
 
       {/* §3.9 Recommendation Engine */}
-      {mainView === 'recommendations' && (
+      {activeView === 'recommendations' && (
         <RecommendationEngine
           recommendations={recommendations}
           loading={recsLoading}
@@ -1051,7 +1037,7 @@ export default function SupplyPlanning() {
       )}
 
       {/* §3.8 Scenario Simulation */}
-      {mainView === 'scenarios' && (
+      {activeView === 'scenarios' && (
         <ScenarioSimulation
           filters={filters}
           onSwitchScenario={handleSwitchScenario}
@@ -1288,8 +1274,6 @@ function ConstraintDashboard({ filters, refreshKey }) {
       ...(filters.plant      && { plant:      String(filters.plant) }),
       ...(filters.skuFamily  && { skuFamily:  filters.skuFamily }),
     });
-    // DEBUG — remove after diagnosis
-    console.log('[CONSTRAINTS FETCH]', `/api/supply/constraints?${p}`);
     fetch(`/api/supply/constraints?${p}`)
       .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then(setData)
@@ -2282,48 +2266,6 @@ function ScenarioSimulation({ filters, onSwitchScenario, onResetComplete, showHi
   );
 }
 
-// ── View tabs (main workbench sections) ──────────────────────────────────────
-
-// HIDDEN_TABS: pegging and scenarios are fully functional but not shown in the nav.
-// To re-enable, remove their IDs from this set.
-const HIDDEN_TABS = new Set(['pegging', 'scenarios']);
-
-function ViewTabs({ active, onChange, recCount }) {
-  const tabs = [
-    { id: 'grid',            label: 'Planning Grid',    icon: Layers },
-    { id: 'constraints',     label: 'Constraints',      icon: Activity },
-    { id: 'whatif',          label: 'What-If',          icon: FlaskConical },
-    { id: 'pegging',         label: 'Pegging',          icon: GitBranch },
-    { id: 'recommendations', label: 'Recommendations',  icon: BarChart2,  badge: recCount },
-    { id: 'scenarios',       label: 'Scenarios',        icon: Sliders },
-  ].filter(t => !HIDDEN_TABS.has(t.id));
-  return (
-    <div style={{ display: 'flex', gap: 2, padding: '6px 16px', background: 'var(--card)', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-      {tabs.map(tab => {
-        const isActive = active === tab.id;
-        const Icon = tab.icon;
-        return (
-          <button key={tab.id} onClick={() => onChange(tab.id)} style={{
-            display: 'flex', alignItems: 'center', gap: 5,
-            padding: '5px 14px', borderRadius: 7, fontSize: 11,
-            fontWeight: isActive ? 700 : 500, cursor: 'pointer', border: 'none',
-            background: isActive ? 'var(--navy-accent)' : 'transparent',
-            color: isActive ? 'white' : 'var(--text-2)', transition: 'all 0.12s',
-          }}>
-            <Icon size={12} />
-            {tab.label}
-            {(tab.badge > 0) && (
-              <span style={{ fontSize: 9, fontWeight: 800, padding: '1px 5px', borderRadius: 8, marginLeft: 2,
-                background: isActive ? 'rgba(255,255,255,0.25)' : 'var(--danger)', color: 'white' }}>
-                {tab.badge}
-              </span>
-            )}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
 
 const s = {
   filterBar: {
@@ -2384,8 +2326,6 @@ function WhatIfTab({ filters, filterOptions, actionsMeta, onRefreshGrid }) {
     if (filterSev)          qs.set('severity',   filterSev);
     if (filters.locationId) qs.set('locationId', filters.locationId);
     if (filters.skuFamily)  qs.set('skuFamily',  filters.skuFamily);
-    // DEBUG — remove after diagnosis
-    console.log('[WHATIF FETCH]', `/api/supply/whatif/candidates?${qs}`);
     fetch(`/api/supply/whatif/candidates?${qs}`)
       .then(r => r.json())
       .then(d => setCandidates(d.candidates || []))

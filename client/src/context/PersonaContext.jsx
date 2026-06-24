@@ -32,9 +32,10 @@ export function PersonaProvider({ children }) {
     setPersonaState(prev => prev ? { ...prev, ...patch } : patch);
 
   const clearPersona = () => setPersonaState(null);
+  const [activeView, setActiveView] = useState('grid');
 
   return (
-    <PersonaContext.Provider value={{ persona, setPersona, clearPersona }}>
+    <PersonaContext.Provider value={{ persona, setPersona, clearPersona, activeView, setActiveView }}>
       {children}
     </PersonaContext.Provider>
   );

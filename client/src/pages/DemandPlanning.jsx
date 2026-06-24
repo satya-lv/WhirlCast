@@ -255,65 +255,11 @@ function DemandFilterBar({ filters, onChange, options, lockedField, lockedLabel 
   );
 }
 
-// ── Tab bar ───────────────────────────────────────────────────────────────────
-
-const TABS = [
-  { id: 'grid',       label: 'Forecast Grid',    active: true  },
-  { id: 'patterns',   label: 'Patterns',         active: true  },
-  { id: 'whatif',     label: 'What-If',          active: true  },
-  { id: 'exceptions', label: 'Exceptions',       active: true  },
-  { id: 'npi',        label: 'NPI Forecasting',  active: true  },
-];
-
-function TabBar({ activeTab, onSelect }) {
-  return (
-    <div style={{
-      display: 'flex', gap: 0,
-      borderBottom: '2px solid var(--border)',
-      background: 'var(--card)', flexShrink: 0,
-      paddingLeft: 16,
-    }}>
-      {TABS.map(tab => {
-        const isActive = activeTab === tab.id;
-        return (
-          <button
-            key={tab.id}
-            onClick={tab.active ? () => onSelect(tab.id) : undefined}
-            style={{
-              padding: '10px 18px',
-              fontSize: 12, fontWeight: isActive ? 700 : 400,
-              color: isActive ? 'var(--navy-accent)' : tab.active ? 'var(--text-2)' : 'var(--text-3)',
-              background: 'transparent', border: 'none',
-              borderBottom: isActive ? '2px solid var(--navy-accent)' : '2px solid transparent',
-              marginBottom: -2,
-              cursor: tab.active ? 'pointer' : 'not-allowed',
-              transition: 'color 0.12s',
-              display: 'flex', alignItems: 'center', gap: 6,
-            }}
-          >
-            {tab.label}
-            {!tab.active && (
-              <span style={{
-                fontSize: 8, fontWeight: 700, letterSpacing: '0.4px',
-                padding: '1px 5px', borderRadius: 8,
-                background: 'rgba(0,0,0,0.06)', color: 'var(--text-3)',
-              }}>
-                SOON
-              </span>
-            )}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function DemandPlanning() {
   const navigate = useNavigate();
-  const { persona, setPersona } = usePersona();
+  const { persona, setPersona, activeView, setActiveView } = usePersona();
   const lockedFilter = getLockedFilter(persona?.role, 'demand');
 
   const [filterOptions, setFilterOptions] = useState(null);
@@ -329,7 +275,6 @@ export default function DemandPlanning() {
   const [gridLoading, setGridLoading] = useState(false);
   const [editableFrom, setEditableFrom] = useState(24);
   const [showHistory,  setShowHistory]  = useState(false);
-  const [activeTab,  setActiveTab]  = useState('grid');
   const [error,      setError]      = useState(null);
   const [patternsData,      setPatternsData]      = useState(null);
   const [patternsLoading,   setPatternsLoading]   = useState(false);
@@ -354,6 +299,8 @@ export default function DemandPlanning() {
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  useEffect(() => { setActiveView('grid'); }, []);
 
   // Fetch filter options on mount
   useEffect(() => {
@@ -410,7 +357,7 @@ export default function DemandPlanning() {
   const markGridDirty = useCallback(() => { gridNeedsRefresh.current = true; }, []);
 
   useEffect(() => {
-    if (activeTab !== 'grid') return;
+    if (activeView !== 'grid') return;
     if (!gridNeedsRefresh.current) return;
     gridNeedsRefresh.current = false;
     setGridLoading(true);
@@ -422,7 +369,7 @@ export default function DemandPlanning() {
       })
       .catch(err => setError(err.message))
       .finally(() => setGridLoading(false));
-  }, [activeTab, filters, showHistory]);
+  }, [activeView, filters, showHistory]);
 
   // Fetch patterns data when Patterns tab is active (or when filters change while on it)
   const loadPatterns = useCallback(() => {
@@ -434,9 +381,9 @@ export default function DemandPlanning() {
   }, [filters]);
 
   useEffect(() => {
-    if (activeTab !== 'patterns') return;
+    if (activeView !== 'patterns') return;
     loadPatterns();
-  }, [activeTab, loadPatterns]);
+  }, [activeView, loadPatterns]);
 
   const loadExceptions = useCallback(() => {
     setExceptionsLoading(true);
@@ -447,9 +394,9 @@ export default function DemandPlanning() {
   }, [filters]);
 
   useEffect(() => {
-    if (activeTab !== 'exceptions') return;
+    if (activeView !== 'exceptions') return;
     loadExceptions();
-  }, [activeTab, loadExceptions]);
+  }, [activeView, loadExceptions]);
 
   const handleRecalculate = useCallback(async () => {
     setRecalculating(true);
@@ -536,8 +483,6 @@ export default function DemandPlanning() {
         lockedLabel={lockedFilter?.label}
       />
 
-      {/* Tab navigation */}
-      <TabBar activeTab={activeTab} onSelect={setActiveTab} />
 
       {/* Forecast Grid tab — always mounted; display:none preserves react-window scroll/expand state */}
       <div
@@ -545,7 +490,7 @@ export default function DemandPlanning() {
         style={{
           flex: 1, minHeight: 0, padding: '12px',
           boxSizing: 'border-box', overflow: 'hidden',
-          display: activeTab === 'grid' ? 'flex' : 'none',
+          display: activeView === 'grid' ? 'flex' : 'none',
           flexDirection: 'column',
         }}
       >
@@ -571,7 +516,7 @@ export default function DemandPlanning() {
       {/* Patterns tab — always mounted; display:none so it doesn't re-fetch on every switch */}
       <div style={{
         flex: 1, minHeight: 0, overflowY: 'auto',
-        display: activeTab === 'patterns' ? 'flex' : 'none',
+        display: activeView === 'patterns' ? 'flex' : 'none',
         flexDirection: 'column',
       }}>
         <PatternsTab
@@ -585,7 +530,7 @@ export default function DemandPlanning() {
       {/* What-If tab — always mounted; display:none preserves SKU/location selection + slider state */}
       <div style={{
         flex: 1, minHeight: 0, overflowY: 'auto',
-        display: activeTab === 'whatif' ? 'flex' : 'none',
+        display: activeView === 'whatif' ? 'flex' : 'none',
         flexDirection: 'column',
       }}>
         <WhatIfTab
@@ -598,7 +543,7 @@ export default function DemandPlanning() {
       {/* Exceptions tab — always mounted; display:none preserves category filter + acknowledged state */}
       <div style={{
         flex: 1, minHeight: 0, overflowY: 'auto',
-        display: activeTab === 'exceptions' ? 'flex' : 'none',
+        display: activeView === 'exceptions' ? 'flex' : 'none',
         flexDirection: 'column',
       }}>
         <ExceptionsTab
@@ -610,7 +555,7 @@ export default function DemandPlanning() {
       {/* NPI Forecasting tab — always mounted; display:none preserves LFL selection + computed state */}
       <div style={{
         flex: 1, minHeight: 0, overflowY: 'auto',
-        display: activeTab === 'npi' ? 'flex' : 'none',
+        display: activeView === 'npi' ? 'flex' : 'none',
         flexDirection: 'column',
       }}>
         <NPITab lockedSkuFamily={lockedFilter?.field === 'skuFamily' ? lockedFilter.value : null} />

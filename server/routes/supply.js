@@ -336,10 +336,6 @@ router.get('/constraints', (req, res) => {
     }
     const xWhere = xConds.length ? 'AND ' + xConds.join(' AND ') : '';
 
-    // DEBUG — remove after diagnosis
-    console.log('[CONSTRAINTS] query:', JSON.stringify(req.query));
-    console.log('[CONSTRAINTS] xWhere:', xWhere || '(none)', 'xParams:', xParams);
-
     if (view === 'capacity') {
       // Aggregate capacity at the plant+line level across the week window
       const rows = db.prepare(`
@@ -811,10 +807,6 @@ router.get('/recommendations', (req, res) => {
     }
     const rWhere = rConds.length ? 'AND ' + rConds.join(' AND ') : '';
 
-    // DEBUG — remove after diagnosis
-    console.log('[RECS] query:', JSON.stringify(req.query));
-    console.log('[RECS] rWhere:', rWhere || '(none)', 'rParams:', rParams);
-
     // Load hours_per_unit map once
     const hpuRows = db.prepare(`SELECT sku, hours_per_unit FROM sku_planning_params`).all();
     const HPU = Object.fromEntries(hpuRows.map(r => [r.sku, r.hours_per_unit]));
@@ -1213,10 +1205,6 @@ router.get('/whatif/candidates', (req, res) => {
     const { abcClass, xyzClass, severity, locationId: candLocId, skuFamily: candFamily } = req.query;
     const familySkus = candFamily && FAMILY_PATTERNS[candFamily] ? new Set(FAMILY_PATTERNS[candFamily]) : null;
 
-    // DEBUG — remove after diagnosis
-    console.log('[CANDIDATES] query:', JSON.stringify(req.query));
-    console.log('[CANDIDATES] candLocId:', candLocId, 'candFamily:', candFamily, 'familySkus:', familySkus ? [...familySkus] : null);
-    console.log('[CANDIDATES] raw row count before filter:', rows.length);
     const candidates = rows
       .map(r => {
         const pct = r.total_demand > 0 ? r.total_shortage / r.total_demand : 0;

@@ -5,7 +5,6 @@ import { PersonaProvider } from './context/PersonaContext';
 import { ToastProvider } from './context/ToastContext';
 import Navbar from './components/layout/Navbar';      // mobile-only (guards itself with isMobile)
 import Sidebar from './components/layout/Sidebar';    // desktop-only
-import { KPIBar } from './components/shared/KPIBar';  // fixed top, all authenticated pages
 import { useIsMobile } from './utils/useIsMobile';
 import './index.css';
 
@@ -95,9 +94,6 @@ function AppLayout() {
       overflow: 'hidden',
       background: 'var(--bg)',
     }}>
-      {isAuthenticated && (
-        <KPIBar kpis={{}} />
-      )}
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         {isAuthenticated && !isMobile && <Sidebar />}

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { usePersona } from '../context/PersonaContext';
 import { Plus, Edit2, Trash2, Upload, Download } from 'lucide-react';
 import Modal from '../components/shared/Modal';
 import { useToast } from '../context/ToastContext';
@@ -23,7 +24,12 @@ function downloadCSV(filename, headers, rows) {
 export default function AdminConsole() {
   useEffect(() => { document.title = 'WhirlCast — Admin Console'; }, []);
   const { toast } = useToast();
-  const [activeTab, setActiveTab] = useState('products');
+  const { persona, activeView, setActiveView } = usePersona();
+
+  const [localTab, setLocalTab] = useState('products');
+  useEffect(() => { setActiveView('products'); }, []);
+  const activeTab    = persona ? activeView    : localTab;
+  const setActiveTab = persona ? setActiveView : setLocalTab;
   const [products, setProducts] = useState([]);
   const [lfl, setLfl] = useState([]);
   const [users, setUsers] = useState([]);
@@ -175,20 +181,22 @@ export default function AdminConsole() {
         subtitle="Manage product masters, LFL mapping and users"
         helpText="Manage product master data (SKUs, categories, pricing), configure like-for-like mappings for discontinued products, and control user access. Changes take effect immediately for all active sessions."/>
 
-      {/* Tabs */}
-      <div style={{ display: 'flex', gap: 4, background: '#F4F6FA', borderRadius: 10, padding: 4, marginBottom: 20, width: 'fit-content' }}>
-        {TABS.map(tab => (
-          <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
-            background: activeTab === tab.id ? '#FFF' : 'transparent',
-            color: activeTab === tab.id ? '#1B3A6B' : '#6B7280',
-            border: 'none', borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: activeTab === tab.id ? 600 : 400,
-            cursor: 'pointer', fontFamily: 'Inter', boxShadow: activeTab === tab.id ? '0 1px 6px rgba(0,0,0,0.08)' : 'none',
-            transition: 'all 0.15s', whiteSpace: 'nowrap',
-          }}>
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      {/* Tabs — only shown when not using sidebar navigation (non-persona auth flow) */}
+      {!persona && (
+        <div style={{ display: 'flex', gap: 4, background: '#F4F6FA', borderRadius: 10, padding: 4, marginBottom: 20, width: 'fit-content' }}>
+          {TABS.map(tab => (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
+              background: activeTab === tab.id ? '#FFF' : 'transparent',
+              color: activeTab === tab.id ? '#1B3A6B' : '#6B7280',
+              border: 'none', borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: activeTab === tab.id ? 600 : 400,
+              cursor: 'pointer', fontFamily: 'Inter', boxShadow: activeTab === tab.id ? '0 1px 6px rgba(0,0,0,0.08)' : 'none',
+              transition: 'all 0.15s', whiteSpace: 'nowrap',
+            }}>
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Product Master */}
       {activeTab === 'products' && (

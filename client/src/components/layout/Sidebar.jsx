@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { usePersona } from '../../context/PersonaContext';
 import {
   LayoutDashboard, BarChart2, GitBranch, Zap, Plus,
-  Layers,
+  Layers, TrendingUp, FlaskConical, Activity, Package, ArrowLeftRight,
   Users, AlertTriangle, Truck,
   Shield, CheckSquare,
   FileBarChart, Settings, LogOut, Sun, Moon, RotateCcw, UserX,
@@ -60,6 +60,33 @@ const UTILITY_NAV = [
   { label: 'Report',        path: '/report', icon: FileBarChart, roles: ['demand_planning', 'branch_sales', 'category_team', 'admin'] },
   { label: 'Admin Console', path: '/admin',  icon: Settings,     roles: ['admin', 'demand_planning'] },
 ];
+
+const MODULE_TABS = {
+  demand: [
+    { id: 'grid',       label: 'Forecast Grid',   icon: BarChart2     },
+    { id: 'patterns',   label: 'Patterns',         icon: TrendingUp    },
+    { id: 'whatif',     label: 'What-If',          icon: FlaskConical  },
+    { id: 'exceptions', label: 'Exceptions',       icon: AlertTriangle },
+    { id: 'npi',        label: 'NPI Forecasting',  icon: Plus          },
+  ],
+  supply: [
+    { id: 'grid',            label: 'Planning Grid',   icon: Layers       },
+    { id: 'constraints',     label: 'Constraints',     icon: Activity     },
+    { id: 'recommendations', label: 'Recommendations', icon: BarChart2    },
+    { id: 'whatif',          label: 'What-If',         icon: FlaskConical },
+  ],
+  admin: [
+    { id: 'products', label: 'Product Master',  icon: Package         },
+    { id: 'lfl',      label: 'LFL Master',      icon: ArrowLeftRight  },
+    { id: 'users',    label: 'User Management', icon: Users           },
+  ],
+};
+
+const MODULE_TITLE = {
+  demand: 'Demand Planning',
+  supply: 'Supply Planning',
+  admin:  'Admin Console',
+};
 
 const PERSONA_ROLE_LABEL = {
   planner:          (module) => module === 'supply' ? 'Supply Planner' : 'Demand Planner',
@@ -152,8 +179,9 @@ function NavItem({ item, userRole }) {
 
 export default function Sidebar() {
   const { user, logout } = useAuth();
-  const { persona, clearPersona } = usePersona();
+  const { persona, clearPersona, activeView, setActiveView } = usePersona();
   const navigate = useNavigate();
+  const location = useLocation();
   const [dark, setDark] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
   const [resetting, setResetting] = useState(false);
@@ -220,6 +248,13 @@ export default function Sidebar() {
 
   const visibleUtils = UTILITY_NAV.filter(i => i.roles.includes(role));
 
+  let moduleKey = null;
+  if (persona) {
+    if (location.pathname.startsWith('/demand-planning')) moduleKey = 'demand';
+    else if (location.pathname.startsWith('/supply'))      moduleKey = 'supply';
+    else if (location.pathname.startsWith('/admin'))       moduleKey = 'admin';
+  }
+
   return (
     <>
       <aside style={{
@@ -230,13 +265,21 @@ export default function Sidebar() {
         overflow: 'hidden',
       }}>
 
-        {/* ── Logo ── */}
-        <div style={{
-          padding: '16px 16px 12px',
-          borderBottom: '1px solid rgba(255,255,255,0.08)',
-          flexShrink: 0,
-          display: 'flex', alignItems: 'center', gap: 10,
-        }}>
+        {/* ── Logo — click to return to login ── */}
+        <div
+          onClick={handleSwitchPersona}
+          title="Return to login"
+          style={{
+            padding: '16px 16px 12px',
+            borderBottom: '1px solid rgba(255,255,255,0.08)',
+            flexShrink: 0,
+            display: 'flex', alignItems: 'center', gap: 10,
+            cursor: 'pointer',
+            transition: 'opacity 0.15s',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.opacity = '0.75'; }}
+          onMouseLeave={e => { e.currentTarget.style.opacity = '1'; }}
+        >
           <svg width="28" height="28" viewBox="0 0 48 48" style={{ flexShrink: 0 }}>
             <rect width="48" height="48" rx="10" fill="#E31837"/>
             <polyline points="8,34 16,18 22,26 29,14 36,30 44,22"
@@ -249,35 +292,84 @@ export default function Sidebar() {
           </div>
         </div>
 
-        {/* ── Nav groups (scrollable) ── */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '8px 8px 4px' }}>
-          {visibleGroups.map(({ group, items }) => (
-            <div key={group} style={{ marginBottom: 4 }}>
-              <div style={{
-                fontSize: 9, fontWeight: 700, letterSpacing: '0.8px',
-                textTransform: 'uppercase', color: 'rgba(255,255,255,0.28)',
-                padding: '10px 8px 4px',
-              }}>
-                {group}
-              </div>
-              {items.map(item => (
-                <NavItem key={item.label} item={item} userRole={role} />
+        {/* ── Nav section: module-scoped inside a module, global otherwise ── */}
+        {moduleKey ? (
+          <div style={{ flex: 1, overflowY: 'auto', padding: '8px 8px 4px' }}>
+            <div style={{
+              fontSize: 9, fontWeight: 700, letterSpacing: '0.8px',
+              textTransform: 'uppercase', color: 'rgba(255,255,255,0.28)',
+              padding: '10px 8px 4px',
+            }}>
+              {MODULE_TITLE[moduleKey]}
+            </div>
+            {MODULE_TABS[moduleKey].map(tab => {
+              const isActive = activeView === tab.id;
+              const Icon = tab.icon;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveView(tab.id)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+                    padding: '11px 14px', borderRadius: 8, marginBottom: 2,
+                    fontSize: 12, fontWeight: isActive ? 600 : 400,
+                    color: isActive ? 'white' : 'rgba(255,255,255,0.6)',
+                    background: isActive ? 'rgba(255,255,255,0.13)' : 'transparent',
+                    border: 'none', cursor: 'pointer', textAlign: 'left',
+                    borderLeft: isActive ? '3px solid rgba(255,255,255,0.65)' : '3px solid transparent',
+                    boxSizing: 'border-box',
+                    transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+                  }}
+                  onMouseEnter={e => {
+                    if (!isActive) {
+                      e.currentTarget.style.background = 'rgba(255,255,255,0.08)';
+                      e.currentTarget.style.color = 'rgba(255,255,255,0.88)';
+                    }
+                  }}
+                  onMouseLeave={e => {
+                    if (!isActive) {
+                      e.currentTarget.style.background = 'transparent';
+                      e.currentTarget.style.color = 'rgba(255,255,255,0.6)';
+                    }
+                  }}
+                >
+                  {Icon && <Icon size={14} strokeWidth={1.8} style={{ flexShrink: 0, opacity: isActive ? 1 : 0.7 }} />}
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '8px 8px 4px' }}>
+              {visibleGroups.map(({ group, items }) => (
+                <div key={group} style={{ marginBottom: 4 }}>
+                  <div style={{
+                    fontSize: 9, fontWeight: 700, letterSpacing: '0.8px',
+                    textTransform: 'uppercase', color: 'rgba(255,255,255,0.28)',
+                    padding: '10px 8px 4px',
+                  }}>
+                    {group}
+                  </div>
+                  {items.map(item => (
+                    <NavItem key={item.label} item={item} userRole={role} />
+                  ))}
+                </div>
               ))}
             </div>
-          ))}
-        </div>
 
-        {/* ── Utility nav (Report, Admin) ── */}
-        {visibleUtils.length > 0 && (
-          <div style={{
-            padding: '8px 8px 4px',
-            borderTop: '1px solid rgba(255,255,255,0.08)',
-            flexShrink: 0,
-          }}>
-            {visibleUtils.map(item => (
-              <NavItem key={item.label} item={item} userRole={role} />
-            ))}
-          </div>
+            {visibleUtils.length > 0 && (
+              <div style={{
+                padding: '8px 8px 4px',
+                borderTop: '1px solid rgba(255,255,255,0.08)',
+                flexShrink: 0,
+              }}>
+                {visibleUtils.map(item => (
+                  <NavItem key={item.label} item={item} userRole={role} />
+                ))}
+              </div>
+            )}
+          </>
         )}
 
         {/* ── User + utilities ── */}
