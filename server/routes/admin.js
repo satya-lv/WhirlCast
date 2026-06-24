@@ -110,7 +110,12 @@ router.post('/products/update', (req, res) => {
 router.get('/lfl', (req, res) => {
   try {
     const db = getDb();
-    const mappings = db.prepare(`SELECT * FROM lfl_master ORDER BY effective_date DESC`).all();
+    const mappings = db.prepare(`
+      SELECT lfl.*, pm.category
+      FROM lfl_master lfl
+      LEFT JOIN product_master pm ON lfl.new_sku = pm.sku
+      ORDER BY lfl.effective_date DESC
+    `).all();
     db.close();
     res.json({ mappings });
   } catch (err) {

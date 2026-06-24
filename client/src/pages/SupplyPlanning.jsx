@@ -10,9 +10,11 @@
 import React, {
   useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo,
 } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { usePersona, getLockedFilter } from '../context/PersonaContext';
 import {
   Layers, RefreshCw, AlertTriangle, ChevronDown, ChevronRight, Zap,
-  BarChart2, GitBranch, Activity, Inbox as InboxIcon,
+  BarChart2, GitBranch, Activity,
   Sliders, Plus, Trophy, ArrowRight, Trash2, CheckCircle, FlaskConical,
 } from 'lucide-react';
 import {
@@ -43,10 +45,11 @@ async function fetchAllGridPages(filters) {
     weekEnd:    filters.weekEnd,
     scenarioId: filters.scenarioId,
     pageSize:   50,
-    ...(filters.region    && { region:    filters.region }),
-    ...(filters.plant     && { plant:     filters.plant }),
-    ...(filters.sku       && { sku:       filters.sku }),
-    ...(filters.skuFamily && { skuFamily: filters.skuFamily }),
+    ...(filters.region     && { region:     filters.region }),
+    ...(filters.locationId && { locationId: filters.locationId }),
+    ...(filters.plant      && { plant:      filters.plant }),
+    ...(filters.sku        && { sku:        filters.sku }),
+    ...(filters.skuFamily  && { skuFamily:  filters.skuFamily }),
   };
   const p1 = await fetch('/api/supply/grid?' + new URLSearchParams({ ...base, page: 1 }));
   if (!p1.ok) throw new Error(`Grid API error ${p1.status}`);
@@ -70,10 +73,11 @@ async function fetchKPIs(filters) {
     scenarioId: filters.scenarioId,
     weekStart:  filters.weekStart,
     weekEnd:    filters.weekEnd,
-    ...(filters.region    && { region:    filters.region }),
-    ...(filters.plant     && { plant:     filters.plant }),
-    ...(filters.sku       && { sku:       filters.sku }),
-    ...(filters.skuFamily && { skuFamily: filters.skuFamily }),
+    ...(filters.region     && { region:     filters.region }),
+    ...(filters.locationId && { locationId: filters.locationId }),
+    ...(filters.plant      && { plant:      filters.plant }),
+    ...(filters.sku        && { sku:        filters.sku }),
+    ...(filters.skuFamily  && { skuFamily:  filters.skuFamily }),
   });
   const r = await fetch('/api/supply/kpis?' + params);
   if (!r.ok) throw new Error('KPI fetch failed');
@@ -193,7 +197,13 @@ function StatusCountRow({ counts, loading }) {
 
 // ── Filter bar (§3.1) ─────────────────────────────────────────────────────────
 
-function FilterBar({ options, filters, onChange, showHistory, onToggleHistory }) {
+const supplyLockedText = (label) => (
+  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-1)', flexShrink: 0 }}>
+    {label}
+  </span>
+);
+
+function FilterBar({ options, filters, onChange, showHistory, onToggleHistory, lockedField, lockedLabel }) {
   if (!options) {
     return (
       <div style={s.filterBar}>
@@ -204,14 +214,24 @@ function FilterBar({ options, filters, onChange, showHistory, onToggleHistory })
   const set = (key, val) => onChange(prev => ({ ...prev, [key]: val }));
   return (
     <div style={s.filterBar}>
-      <FSelect label="SKU Family" value={filters.skuFamily} onChange={v => set('skuFamily', v)}>
-        <option value="">All Families</option>
-        {options.skuFamilies.map(f => <option key={f} value={f}>{f}</option>)}
-      </FSelect>
-      <FSelect label="Region" value={filters.region} onChange={v => set('region', v)}>
-        <option value="">All Regions</option>
-        {options.regions.map(r => <option key={r} value={r}>{r}</option>)}
-      </FSelect>
+      {lockedField === 'skuFamily'
+        ? supplyLockedText(lockedLabel)
+        : (
+          <FSelect label="SKU Family" value={filters.skuFamily} onChange={v => set('skuFamily', v)}>
+            <option value="">All Families</option>
+            {options.skuFamilies.map(f => <option key={f} value={f}>{f}</option>)}
+          </FSelect>
+        )
+      }
+      {lockedField === 'region' || lockedField === 'locationId'
+        ? supplyLockedText(lockedLabel)
+        : (
+          <FSelect label="Region" value={filters.region} onChange={v => set('region', v)}>
+            <option value="">All Regions</option>
+            {options.regions.map(r => <option key={r} value={r}>{r}</option>)}
+          </FSelect>
+        )
+      }
       <FSelect label="Plant" value={filters.plant} onChange={v => set('plant', v)}>
         <option value="">All Plants</option>
         {options.plants.map(p => <option key={p.plant_id} value={p.plant_id}>{p.name}</option>)}
@@ -678,9 +698,23 @@ export default function SupplyPlanning() {
   const [filterOptions, setFilterOptions] = useState(null);
   const [actionsMeta,   setActionsMeta]   = useState(null);
   const [metaError,     setMetaError]     = useState(false);
-  const [filters, setFilters] = useState({
-    scenarioId: 1, weekStart: 24, weekEnd: 52,
-    region: '', plant: '', skuFamily: '', sku: '',
+  const navigate = useNavigate();
+  const { persona, setPersona } = usePersona();
+  const lockedFilter = getLockedFilter(persona?.role, 'supply');
+
+  // DEBUG — remove after diagnosis
+  console.log('[SUPPLY] persona:', persona?.role, '| lockedFilter:', lockedFilter);
+
+  const [filters, setFilters] = useState(() => {
+    const init = {
+      scenarioId: 1, weekStart: 24, weekEnd: 52,
+      region:     lockedFilter?.field === 'region'     ? lockedFilter.value : '',
+      locationId: lockedFilter?.field === 'locationId' ? lockedFilter.value : '',
+      skuFamily:  lockedFilter?.field === 'skuFamily'  ? lockedFilter.value : '',
+      plant: '', sku: '',
+    };
+    console.log('[SUPPLY] initial filters.locationId:', init.locationId, '| filters.skuFamily:', init.skuFamily);
+    return init;
   });
   const [showHistory, setShowHistory] = useState(false);
 
@@ -782,7 +816,12 @@ export default function SupplyPlanning() {
       scenarioId: filters.scenarioId,
       weekStart:  filters.weekStart,
       weekEnd:    filters.weekEnd,
+      ...(filters.region     && { region:     filters.region }),
+      ...(filters.locationId && { locationId: String(filters.locationId) }),
+      ...(filters.skuFamily  && { skuFamily:  filters.skuFamily }),
     });
+    // DEBUG — remove after diagnosis
+    console.log('[RECS FETCH]', `/api/supply/recommendations?${params}`);
     fetch(`/api/supply/recommendations?${params}`)
       .then(r => { if (!r.ok) throw new Error('recs'); return r.json(); })
       .then(data => { if (!cancelled) setRecommendations(data); })
@@ -929,6 +968,8 @@ export default function SupplyPlanning() {
       <FilterBar
         options={filterOptions} filters={filters} onChange={setFilters}
         showHistory={showHistory} onToggleHistory={handleToggleHistory}
+        lockedField={lockedFilter?.field}
+        lockedLabel={lockedFilter?.label}
       />
 
       {/* §3.2 KPI strip */}
@@ -1009,16 +1050,6 @@ export default function SupplyPlanning() {
         />
       )}
 
-      {/* §4 Planner Exception Inbox */}
-      {mainView === 'inbox' && (
-        <ExceptionInbox
-          filters={filters}
-          recommendations={recommendations}
-          onNavigate={setMainView}
-          showHistory={showHistory}
-        />
-      )}
-
       {/* §3.8 Scenario Simulation */}
       {mainView === 'scenarios' && (
         <ScenarioSimulation
@@ -1027,6 +1058,27 @@ export default function SupplyPlanning() {
           onResetComplete={handleResetComplete}
           showHistory={showHistory}
         />
+      )}
+
+      {/* Cross-module CTA — only when entering via persona flow */}
+      {persona?.role && (
+        <button
+          onClick={() => {
+            setPersona({ module: 'demand' });
+            navigate('/demand-planning');
+          }}
+          style={{
+            position: 'fixed', bottom: 24, right: 24, zIndex: 50,
+            background: 'var(--navy)', color: 'white',
+            border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: 24, padding: '10px 18px',
+            fontSize: 12, fontWeight: 600, cursor: 'pointer',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+            display: 'flex', alignItems: 'center', gap: 6,
+          }}
+        >
+          Switch to Demand Planning →
+        </button>
       )}
     </div>
   );
@@ -1231,9 +1283,13 @@ function ConstraintDashboard({ filters, refreshKey }) {
       scenarioId: filters.scenarioId,
       weekStart:  filters.weekStart,
       weekEnd:    filters.weekEnd,
-      ...(filters.region && { region: filters.region }),
-      ...(filters.plant  && { plant:  String(filters.plant) }),
+      ...(filters.region     && { region:     filters.region }),
+      ...(filters.locationId && { locationId: String(filters.locationId) }),
+      ...(filters.plant      && { plant:      String(filters.plant) }),
+      ...(filters.skuFamily  && { skuFamily:  filters.skuFamily }),
     });
+    // DEBUG — remove after diagnosis
+    console.log('[CONSTRAINTS FETCH]', `/api/supply/constraints?${p}`);
     fetch(`/api/supply/constraints?${p}`)
       .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then(setData)
@@ -1661,93 +1717,6 @@ function RecommendationEngine({ recommendations, loading, scenarioId, onApply })
         <span style={{ fontSize: 11, color: 'var(--text-3)' }}>W{recommendations.weekRange?.start}–W{recommendations.weekRange?.end} · Scenario {recommendations.scenarioId}</span>
       </div>
       {recs.map(rec => <RecCard key={rec.id} rec={rec} scenarioId={scenarioId} onApply={onApply} />)}
-    </div>
-  );
-}
-
-// ── §4 Planner Exception Inbox ─────────────────────────────────────────────────
-
-function InboxItem({ rec, onNavigate }) {
-  const priorityColor = rec.priority === 'HIGH' ? 'var(--danger)' : 'var(--amber)';
-  const typeIcon = rec.type === 'CAPACITY' ? '⚙' : rec.type === 'MATERIAL' ? '📦' : '📊';
-
-  return (
-    <div style={{ display: 'flex', gap: 12, padding: '12px 14px', borderRadius: 10, background: 'var(--card)', border: '1px solid var(--border)', marginBottom: 8, alignItems: 'flex-start', borderLeft: `3px solid ${priorityColor}` }}>
-      <span style={{ fontSize: 18, flexShrink: 0, marginTop: 1 }}>{typeIcon}</span>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-1)', marginBottom: 4, lineHeight: 1.4 }}>{rec.issue}</div>
-        <div style={{ fontSize: 11, color: 'var(--text-2)', marginBottom: 8 }}>{rec.recommendedActions[0]}</div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 8,
-            background: rec.priority === 'HIGH' ? 'rgba(227,24,55,0.12)' : 'rgba(245,158,11,0.12)', color: priorityColor }}>
-            {rec.priority}
-          </span>
-          <span style={{ fontSize: 10, padding: '1px 7px', borderRadius: 8, background: 'var(--bg)', color: 'var(--text-3)', border: '1px solid var(--border)' }}>
-            {rec.type}
-          </span>
-          {rec.impact.before.serviceLevelPct != null && (
-            <span style={{ fontSize: 10, color: 'var(--text-3)' }}>
-              SL: {rec.impact.before.serviceLevelPct.toFixed(1)}% → {rec.impact.after.serviceLevelPct.toFixed(1)}%
-            </span>
-          )}
-          {rec.impact.before.shortageQty != null && rec.impact.before.shortageQty > 0 && (
-            <span style={{ fontSize: 10, color: 'var(--text-3)' }}>
-              Shortage: {rec.impact.before.shortageQty.toFixed(0)} → {rec.impact.after.shortageQty.toFixed(0)} units
-            </span>
-          )}
-        </div>
-      </div>
-      <button onClick={() => onNavigate('recommendations')}
-        style={{ flexShrink: 0, padding: '5px 12px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--navy-accent)', whiteSpace: 'nowrap' }}>
-        View Fix →
-      </button>
-    </div>
-  );
-}
-
-function ExceptionInbox({ filters, recommendations, onNavigate, showHistory }) {
-  const recs = recommendations?.recommendations || [];
-  const high = recs.filter(r => r.priority === 'HIGH');
-  const med  = recs.filter(r => r.priority === 'MEDIUM');
-
-  if (!recommendations) {
-    return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-3)', fontSize: 13 }}>Loading exceptions…</div>;
-  }
-
-  return (
-    <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 16 }}>
-      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)', marginBottom: 4 }}>Planner Exception Inbox</div>
-      <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 16 }}>
-        Active constraint issues needing attention · {showHistory ? 'Including history' : 'Current planning horizon'} · Scenario {filters.scenarioId}
-      </div>
-
-      {recs.length === 0 && (
-        <div style={{ textAlign: 'center', padding: 48, color: 'var(--text-3)' }}>
-          <InboxIcon size={32} strokeWidth={1} style={{ display: 'block', margin: '0 auto 12px' }} />
-          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Inbox is clear</div>
-          <div style={{ fontSize: 12 }}>No active constraint issues for the current period.</div>
-        </div>
-      )}
-
-      {high.length > 0 && (
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px', color: 'var(--danger)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--danger)', display: 'inline-block' }} />
-            High Priority ({high.length})
-          </div>
-          {high.map(rec => <InboxItem key={rec.id} rec={rec} onNavigate={onNavigate} />)}
-        </div>
-      )}
-
-      {med.length > 0 && (
-        <div>
-          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px', color: 'var(--amber)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--amber)', display: 'inline-block' }} />
-            Medium Priority ({med.length})
-          </div>
-          {med.map(rec => <InboxItem key={rec.id} rec={rec} onNavigate={onNavigate} />)}
-        </div>
-      )}
     </div>
   );
 }
@@ -2326,7 +2295,6 @@ function ViewTabs({ active, onChange, recCount }) {
     { id: 'whatif',          label: 'What-If',          icon: FlaskConical },
     { id: 'pegging',         label: 'Pegging',          icon: GitBranch },
     { id: 'recommendations', label: 'Recommendations',  icon: BarChart2,  badge: recCount },
-    { id: 'inbox',           label: 'Inbox',            icon: InboxIcon,  badge: recCount },
     { id: 'scenarios',       label: 'Scenarios',        icon: Sliders },
   ].filter(t => !HIDDEN_TABS.has(t.id));
   return (
@@ -2411,15 +2379,19 @@ function WhatIfTab({ filters, filterOptions, actionsMeta, onRefreshGrid }) {
       weekStart: filters.weekStart,
       weekEnd: filters.weekEnd,
     });
-    if (filterAbc) qs.set('abcClass', filterAbc);
-    if (filterXyz) qs.set('xyzClass', filterXyz);
-    if (filterSev) qs.set('severity', filterSev);
+    if (filterAbc)          qs.set('abcClass',   filterAbc);
+    if (filterXyz)          qs.set('xyzClass',   filterXyz);
+    if (filterSev)          qs.set('severity',   filterSev);
+    if (filters.locationId) qs.set('locationId', filters.locationId);
+    if (filters.skuFamily)  qs.set('skuFamily',  filters.skuFamily);
+    // DEBUG — remove after diagnosis
+    console.log('[WHATIF FETCH]', `/api/supply/whatif/candidates?${qs}`);
     fetch(`/api/supply/whatif/candidates?${qs}`)
       .then(r => r.json())
       .then(d => setCandidates(d.candidates || []))
       .catch(e => setCandError(e.message))
       .finally(() => setCandLoading(false));
-  }, [filters.scenarioId, filters.weekStart, filters.weekEnd, filterAbc, filterXyz, filterSev]);
+  }, [filters.scenarioId, filters.weekStart, filters.weekEnd, filters.locationId, filters.skuFamily, filterAbc, filterXyz, filterSev]);
 
   const toggleAll = () => {
     if (selected.size === candidates.length) setSelected(new Set());

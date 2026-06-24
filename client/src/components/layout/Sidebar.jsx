@@ -1,92 +1,77 @@
-/**
- * Sidebar — desktop left navigation for the IBP/S&OP platform.
- *
- * Rendered by AppLayout on screens ≥768px. On mobile, Navbar.jsx
- * handles navigation (hamburger overlay + bottom tabs).
- *
- * Structure:
- *   ┌─ Logo ──────────────────────────────────────────┐
- *   │ [nav groups — scrollable]                        │
- *   ├─────────────────────────────────────────────────┤
- *   │ Report · Admin (role-gated)                      │
- *   ├─────────────────────────────────────────────────┤
- *   │ User info · Dark mode · Reset · Logout           │
- *   └─────────────────────────────────────────────────┘
- *
- * Coming-soon items are non-clickable divs (not NavLink / not routed),
- * clearly marked with a lock icon and a "SOON" chip.
- */
 import React, { useState, useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { usePersona } from '../../context/PersonaContext';
 import {
   LayoutDashboard, BarChart2, GitBranch, Zap, Plus,
   Layers,
   Users, AlertTriangle, Truck,
   Shield, CheckSquare,
-  FileBarChart, Settings, LogOut, Sun, Moon, RotateCcw,
+  FileBarChart, Settings, LogOut, Sun, Moon, RotateCcw, UserX,
 } from 'lucide-react';
 
 // ── Navigation structure ───────────────────────────────────────────────────
 
-/**
- * Each item is either a live NavLink (has `path`) or a coming-soon div (has `comingSoon: true`).
- * `roles` controls visibility per authenticated user role.
- */
 const NAV_GROUPS = [
   {
     group: 'Overview',
     roles: ['demand_planning'],
     items: [
-      {
-        label: 'Dashboard',
-        path: '/dashboard',
-        icon: LayoutDashboard,
-        roles: ['demand_planning'],
-      },
+      { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard, roles: ['demand_planning'] },
     ],
   },
   {
     group: 'Plan',
     roles: ['demand_planning'],
     items: [
-      { label: 'Demand Planning',          path: '/demand-planning', icon: BarChart2,   roles: ['demand_planning'] },
-      { label: 'Scenarios',               path: '/scenarios',      icon: GitBranch,   roles: ['demand_planning'] },
-      { label: 'Demand Sensing',          path: '/demand-sensing', icon: Zap,         roles: ['demand_planning'] },
-      { label: 'NPI Forecasting',         path: '/npi',            icon: Plus,        roles: ['demand_planning'] },
-      { label: 'Supply Planning',          path: '/supply',         icon: Layers,      roles: ['demand_planning'] },
+      { label: 'Demand Planning',  path: '/demand-planning', icon: BarChart2,  roles: ['demand_planning'] },
+      { label: 'Scenarios',        path: '/scenarios',       icon: GitBranch,  roles: ['demand_planning'] },
+      { label: 'Demand Sensing',   path: '/demand-sensing',  icon: Zap,        roles: ['demand_planning'] },
+      { label: 'NPI Forecasting',  path: '/npi',             icon: Plus,       roles: ['demand_planning'] },
+      { label: 'Supply Planning',  path: '/supply',          icon: Layers,     roles: ['demand_planning'] },
     ],
   },
   {
     group: 'Collaborate',
     roles: ['demand_planning', 'branch_sales', 'category_team'],
     items: [
-      { label: 'Branch Overrides',        path: '/collaboration',  icon: Users,         roles: ['demand_planning', 'branch_sales'] },
-      { label: 'Override Conflicts',      path: '/conflicts',      icon: AlertTriangle, roles: ['demand_planning', 'category_team'] },
-      { label: 'Supplier Collaboration',  comingSoon: true,        icon: Truck,         roles: ['demand_planning'] },
+      { label: 'Branch Overrides',       path: '/collaboration', icon: Users,         roles: ['demand_planning', 'branch_sales'] },
+      { label: 'Override Conflicts',     path: '/conflicts',     icon: AlertTriangle, roles: ['demand_planning', 'category_team'] },
+      { label: 'Supplier Collaboration', comingSoon: true,       icon: Truck,         roles: ['demand_planning'] },
     ],
   },
   {
     group: 'Monitor',
     roles: ['demand_planning'],
     items: [
-      { label: 'Risk Management',         comingSoon: true,        icon: Shield,        roles: ['demand_planning'] },
+      { label: 'Risk Management', comingSoon: true, icon: Shield, roles: ['demand_planning'] },
     ],
   },
   {
     group: 'Decide',
     roles: ['demand_planning'],
     items: [
-      { label: 'S&OP Decision Review',    comingSoon: true,        icon: CheckSquare,   roles: ['demand_planning'] },
+      { label: 'S&OP Decision Review', comingSoon: true, icon: CheckSquare, roles: ['demand_planning'] },
     ],
   },
 ];
 
-/** Always shown below the groups; role-gated individually. */
 const UTILITY_NAV = [
-  { label: 'Report',         path: '/report', icon: FileBarChart, roles: ['demand_planning', 'branch_sales', 'category_team', 'admin'] },
-  { label: 'Admin Console',  path: '/admin',  icon: Settings,     roles: ['admin'] },
+  { label: 'Report',        path: '/report', icon: FileBarChart, roles: ['demand_planning', 'branch_sales', 'category_team', 'admin'] },
+  { label: 'Admin Console', path: '/admin',  icon: Settings,     roles: ['admin', 'demand_planning'] },
 ];
+
+const PERSONA_ROLE_LABEL = {
+  planner:          (module) => module === 'supply' ? 'Supply Planner' : 'Demand Planner',
+  branch_manager:   () => 'Branch Manager · Mumbai',
+  category_manager: () => 'Category Mgr · AC',
+};
+
+const PERSONA_ROLE_COLOR = {
+  planner:          '#3B82F6',
+  branch_manager:   '#22C55E',
+  category_manager: '#A855F7',
+};
 
 const ROLE_LABEL = {
   demand_planning: 'Demand Planner',
@@ -153,7 +138,6 @@ function NavItem({ item, userRole }) {
         }
       }}
       onMouseLeave={e => {
-        // NavLink inline style takes precedence; reset only non-active
         const isActive = e.currentTarget.getAttribute('aria-current') === 'page';
         if (!isActive) e.currentTarget.style.background = 'transparent';
       }}
@@ -168,6 +152,7 @@ function NavItem({ item, userRole }) {
 
 export default function Sidebar() {
   const { user, logout } = useAuth();
+  const { persona, clearPersona } = usePersona();
   const navigate = useNavigate();
   const [dark, setDark] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
@@ -201,15 +186,30 @@ export default function Sidebar() {
     setResetting(false);
   };
 
+  const handleSwitchPersona = () => {
+    clearPersona();
+    logout();
+    navigate('/login');
+  };
+
   if (!user) return null;
 
-  const role = user.role;
-  const initials = user.name?.split(' ').map(n => n[0]).join('').slice(0, 2);
-  const roleLabel = role === 'branch_sales'
-    ? ROLE_LABEL.branch_sales(user.branch)
-    : (ROLE_LABEL[role] || role);
+  // Persona takes priority over raw auth user for display
+  const isPersonaActive = !!persona?.role;
+  const displayName = isPersonaActive ? persona.displayName : user.name;
+  const initial = isPersonaActive
+    ? persona.initial
+    : (user.name?.split(' ').map(n => n[0]).join('').slice(0, 2) || '?');
+  const avatarColor = isPersonaActive
+    ? (PERSONA_ROLE_COLOR[persona.role] || '#6B7280')
+    : (ROLE_COLOR[user.role] || '#6B7280');
+  const roleLabel = isPersonaActive
+    ? (PERSONA_ROLE_LABEL[persona.role]?.(persona.module) || persona.role)
+    : (user.role === 'branch_sales'
+        ? ROLE_LABEL.branch_sales(user.branch)
+        : (ROLE_LABEL[user.role] || user.role));
 
-  // Filter groups and items the current role is allowed to see
+  const role = user.role;
   const visibleGroups = NAV_GROUPS
     .filter(g => g.roles.includes(role))
     .map(g => ({
@@ -291,13 +291,13 @@ export default function Sidebar() {
             <div style={{
               width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: ROLE_COLOR[role] || '#6B7280',
+              background: avatarColor,
               fontSize: 11, fontWeight: 700, color: 'white',
-            }}>{initials}</div>
+            }}>{initial}</div>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: 'white', lineHeight: 1.2,
                 whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {user.name}
+                {displayName}
               </div>
               <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.38)', lineHeight: 1.2,
                 whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -310,7 +310,7 @@ export default function Sidebar() {
           <div style={{ display: 'flex', gap: 6 }}>
             <button onClick={toggleTheme} title={dark ? 'Light mode' : 'Dark mode'}
               style={{
-                flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
                 background: 'rgba(255,255,255,0.07)', border: '0.5px solid rgba(255,255,255,0.12)',
                 color: 'rgba(255,255,255,0.55)', borderRadius: 7,
                 padding: '6px', fontSize: 11, cursor: 'pointer',
@@ -320,24 +320,40 @@ export default function Sidebar() {
             <button onClick={() => setShowResetModal(true)} disabled={resetting}
               title="Reset demo data"
               style={{
-                flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
                 background: 'rgba(255,255,255,0.07)', border: '0.5px solid rgba(255,255,255,0.12)',
                 color: 'rgba(255,255,255,0.55)', borderRadius: 7,
                 padding: '6px', fontSize: 11, cursor: 'pointer',
               }}>
               <RotateCcw size={12} />
             </button>
-            <button onClick={() => { logout(); navigate('/login'); }}
-              title="Logout"
+            {/* Switch persona / Logout — persona flow uses clearPersona; fallback is plain logout */}
+            <button
+              onClick={handleSwitchPersona}
+              title={isPersonaActive ? 'Switch persona' : 'Logout'}
               style={{
-                flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
                 background: 'rgba(255,255,255,0.07)', border: '0.5px solid rgba(255,255,255,0.12)',
                 color: 'rgba(255,255,255,0.55)', borderRadius: 7,
                 padding: '6px', fontSize: 11, cursor: 'pointer',
               }}>
-              <LogOut size={12} />
+              {isPersonaActive ? <UserX size={12} /> : <LogOut size={12} />}
             </button>
           </div>
+
+          {/* Persona switch label — only when persona is active */}
+          {isPersonaActive && (
+            <div
+              onClick={handleSwitchPersona}
+              style={{
+                marginTop: 8, textAlign: 'center', fontSize: 10,
+                color: 'rgba(255,255,255,0.3)', cursor: 'pointer',
+                textDecoration: 'underline', letterSpacing: '0.2px',
+              }}
+            >
+              Switch persona
+            </div>
+          )}
         </div>
       </aside>
 

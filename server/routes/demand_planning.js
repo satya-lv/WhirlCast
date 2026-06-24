@@ -583,6 +583,11 @@ router.get('/exceptions', (req, res) => {
     if (req.query.category)   { conds.push('de.category = ?');    params.push(req.query.category); }
     if (req.query.locationId) { conds.push('de.location_id = ?'); params.push(parseInt(req.query.locationId)); }
     if (req.query.sku)        { conds.push('de.sku = ?');          params.push(req.query.sku); }
+    if (req.query.skuFamily && SKU_FAMILIES[req.query.skuFamily]) {
+      const skus = SKU_FAMILIES[req.query.skuFamily];
+      conds.push(`de.sku IN (${skus.map(() => '?').join(',')})`);
+      params.push(...skus);
+    }
     if (req.query.acknowledged !== undefined) {
       conds.push('de.acknowledged = ?');
       params.push(parseInt(req.query.acknowledged));

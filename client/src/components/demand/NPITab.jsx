@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 
 const MONTHS = ['Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov'];
 
@@ -21,7 +21,7 @@ const labelStyle = {
   display: 'block', marginBottom: 6,
 };
 
-export default function NPITab() {
+export default function NPITab({ lockedSkuFamily }) {
   const [npiType,          setNpiType]          = useState(null);
   const [lflMappings,      setLflMappings]      = useState([]);
   const [selectedLfl,      setSelectedLfl]      = useState('');
@@ -33,7 +33,12 @@ export default function NPITab() {
   const [submitAttempted,  setSubmitAttempted]  = useState(false);
   const [saved,            setSaved]            = useState(false);
 
-  const selectedLflEntry = selectedLfl !== '' ? lflMappings[parseInt(selectedLfl)] || null : null;
+  const filteredLflMappings = useMemo(() => {
+    if (!lockedSkuFamily) return lflMappings;
+    return lflMappings.filter(m => m.category === lockedSkuFamily);
+  }, [lflMappings, lockedSkuFamily]);
+
+  const selectedLflEntry = selectedLfl !== '' ? filteredLflMappings[parseInt(selectedLfl)] || null : null;
 
   useEffect(() => {
     fetch('/api/admin/lfl')
@@ -241,7 +246,7 @@ export default function NPITab() {
             </div>
           </div>
 
-          {lflMappings.length === 0 ? (
+          {filteredLflMappings.length === 0 ? (
             <div style={{
               padding: '12px 14px', borderRadius: 8,
               background: '#F3F4F6', color: '#9CA3AF',
@@ -270,7 +275,7 @@ export default function NPITab() {
                 }}
               >
                 <option value="">Select LFL predecessor…</option>
-                {lflMappings.map((l, i) => (
+                {filteredLflMappings.map((l, i) => (
                   <option key={i} value={String(i)}>
                     {l.old_sku} → {l.new_sku} (effective: {l.effective_date})
                   </option>

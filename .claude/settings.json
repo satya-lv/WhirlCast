@@ -13,7 +13,22 @@
       "Bash(node -e \"process.stdin.resume\\(\\);let d='';process.stdin.on\\('data',c=>d+=c\\);process.stdin.on\\('end',\\(\\)=>{const j=JSON.parse\\(d\\);j.recommendations.slice\\(0,3\\).forEach\\(\\(r,i\\)=>console.log\\(i,r.id,r.priority,r.type,r.issue.slice\\(0,80\\),'\\\\n  before:',JSON.stringify\\(r.impact.before\\),'\\\\n  after:',JSON.stringify\\(r.impact.after\\),'\\\\n  actions:',r.recommendedActions[0]\\)\\)}\\);\")",
       "Bash(curl -s \"http://localhost:5001/api/supply/constraints?view=capacity&weekStart=22&weekEnd=34&scenarioId=12\")",
       "Bash(node -e \"process.stdin.resume\\(\\);let d='';process.stdin.on\\('data',c=>d+=c\\);process.stdin.on\\('end',\\(\\)=>{const j=JSON.parse\\(d\\);j.rows.slice\\(0,3\\).forEach\\(r=>console.log\\(r.plant_name,'|',r.line_name,'|',r.utilization_pct,'%','| overload:',r.overload_hrs,'h | shortage:',r.total_shortage\\)\\)}\\);\")",
-      "Bash(node -e \"process.stdin.resume\\(\\);let d='';process.stdin.on\\('data',c=>d+=c\\);process.stdin.on\\('end',\\(\\)=>{const j=JSON.parse\\(d\\);const cap=j.recommendations.find\\(r=>r.type==='CAPACITY'\\);if\\(cap\\){console.log\\('CAP:',cap.id\\);console.log\\('issue:',cap.issue\\);console.log\\('before:',JSON.stringify\\(cap.impact.before\\)\\);console.log\\('after:',JSON.stringify\\(cap.impact.after\\)\\);console.log\\('actions:',cap.recommendedActions\\);}const inv=j.recommendations.find\\(r=>r.type==='INVENTORY'\\);if\\(inv\\){console.log\\('INV:',inv.id\\);console.log\\('issue:',inv.issue\\);console.log\\('before:',JSON.stringify\\(inv.impact.before\\)\\);console.log\\('after:',JSON.stringify\\(inv.impact.after\\)\\);}}\\);\")"
+      "Bash(node -e \"process.stdin.resume\\(\\);let d='';process.stdin.on\\('data',c=>d+=c\\);process.stdin.on\\('end',\\(\\)=>{const j=JSON.parse\\(d\\);const cap=j.recommendations.find\\(r=>r.type==='CAPACITY'\\);if\\(cap\\){console.log\\('CAP:',cap.id\\);console.log\\('issue:',cap.issue\\);console.log\\('before:',JSON.stringify\\(cap.impact.before\\)\\);console.log\\('after:',JSON.stringify\\(cap.impact.after\\)\\);console.log\\('actions:',cap.recommendedActions\\);}const inv=j.recommendations.find\\(r=>r.type==='INVENTORY'\\);if\\(inv\\){console.log\\('INV:',inv.id\\);console.log\\('issue:',inv.issue\\);console.log\\('before:',JSON.stringify\\(inv.impact.before\\)\\);console.log\\('after:',JSON.stringify\\(inv.impact.after\\)\\);}}\\);\")",
+      "Bash(node -e ' *)",
+      "Bash(powershell -Command \"\\(Get-Content 'client\\\\src\\\\pages\\\\SupplyPlanning.jsx'\\).Count\")",
+      "Bash(npm run *)",
+      "Bash(kill 1874 2041)",
+      "Bash(curl -s 'http://localhost:5001/api/supply/constraints?view=capacity&scenarioId=1&weekStart=24&weekEnd=40&locationId=1')",
+      "Bash(node -e \"let d=''; process.stdin.on\\('data',c=>d+=c\\); process.stdin.on\\('end',\\(\\)=>{const r=JSON.parse\\(d\\); console.log\\('count:', r.count\\); r.candidates?.forEach\\(c=>console.log\\(' -', c.sku, c.location_name, c.location_id\\)\\);}\\)\")",
+      "Bash(curl -s 'http://localhost:5001/api/supply/constraints?view=demand_impact&scenarioId=1&weekStart=24&weekEnd=40')",
+      "Bash(node -e \"let d=''; process.stdin.on\\('data',c=>d+=c\\); process.stdin.on\\('end',\\(\\)=>{const r=JSON.parse\\(d\\); console.log\\('candidates \\(no filter\\):', r.count\\); r.candidates?.slice\\(0,5\\).forEach\\(c=>console.log\\(' - loc_id:', c.location_id, c.location_name\\)\\);}\\)\")",
+      "Bash(node -e \"let d=''; process.stdin.on\\('data',c=>d+=c\\); process.stdin.on\\('end',\\(\\)=>{const r=JSON.parse\\(d\\); console.log\\('scenarios:', JSON.stringify\\(r.scenarios\\)\\); console.log\\('week range:', JSON.stringify\\(r.weekRange\\)\\);}\\)\")",
+      "Bash(curl -s 'http://localhost:5001/api/supply/constraints?view=demand_impact&scenarioId=10&weekStart=24&weekEnd=40')",
+      "Bash(node -e \"let d=''; process.stdin.on\\('data',c=>d+=c\\); process.stdin.on\\('end',\\(\\)=>{const r=JSON.parse\\(d\\); console.log\\('recs \\(locationId=1\\):', r.count\\); r.recommendations?.forEach\\(rec=>console.log\\(' -', rec.type, '|', rec.issue?.slice\\(0,70\\)\\)\\);}\\)\")",
+      "Bash(curl -s 'http://localhost:5001/api/supply/constraints?view=demand_impact&scenarioId=10&weekStart=24&weekEnd=40&skuFamily=Air%20Conditioner')",
+      "Bash(node -e \"let d=''; process.stdin.on\\('data',c=>d+=c\\); process.stdin.on\\('end',\\(\\)=>{const r=JSON.parse\\(d\\); console.log\\('count:', r.count\\); r.recommendations?.forEach\\(rec=>console.log\\(' -', rec.issue?.slice\\(0,75\\)\\)\\);}\\)\")",
+      "Bash(BROWSER=none npm start)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000)"
     ]
   }
 }

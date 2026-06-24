@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { PersonaProvider } from './context/PersonaContext';
 import { ToastProvider } from './context/ToastContext';
 import Navbar from './components/layout/Navbar';      // mobile-only (guards itself with isMobile)
 import Sidebar from './components/layout/Sidebar';    // desktop-only
@@ -8,7 +9,9 @@ import { KPIBar } from './components/shared/KPIBar';  // fixed top, all authenti
 import { useIsMobile } from './utils/useIsMobile';
 import './index.css';
 
-import Login from './pages/Login';
+import PersonaLogin from './pages/PersonaLogin';
+import PersonaLanding from './pages/PersonaLanding';
+import PersonaRoleSelect from './pages/PersonaRoleSelect';
 import Dashboard from './pages/Dashboard';
 import ForecastWorkbench from './pages/ForecastWorkbench';
 import ForecastSelection from './pages/ForecastSelection';
@@ -22,7 +25,6 @@ import SupplyPlanning from './pages/SupplyPlanning';
 import DemandPlanning from './pages/DemandPlanning';
 
 // ── Route protection ───────────────────────────────────────────────────────
-// Unchanged from original — same role checks, same redirect logic.
 
 function ProtectedRoute({ children, allowedRoles }) {
   const { user, isAuthenticated } = useAuth();
@@ -47,12 +49,15 @@ function RoleHome() {
 }
 
 // ── Route table ────────────────────────────────────────────────────────────
-// Defined outside AppLayout so the JSX is not re-created on every render.
 
 function AppRoutes() {
   return (
     <Routes>
-      <Route path="/login"         element={<Login />} />
+      {/* Persona flow — no auth gate; persona state guards these via redirect inside component */}
+      <Route path="/login"       element={<PersonaLogin />} />
+      <Route path="/landing"     element={<PersonaLanding />} />
+      <Route path="/role-select" element={<PersonaRoleSelect />} />
+
       <Route path="/"              element={<AuthGate><RoleHome /></AuthGate>} />
       <Route path="/dashboard"     element={<ProtectedRoute allowedRoles={['demand_planning']}><Dashboard /></ProtectedRoute>} />
       <Route path="/workbench"     element={<ProtectedRoute allowedRoles={['demand_planning']}><ForecastWorkbench /></ProtectedRoute>} />
@@ -62,7 +67,8 @@ function AppRoutes() {
       <Route path="/demand-sensing" element={<ProtectedRoute allowedRoles={['demand_planning']}><DemandSensing /></ProtectedRoute>} />
       <Route path="/npi"           element={<ProtectedRoute allowedRoles={['demand_planning']}><NPIForecasting /></ProtectedRoute>} />
       <Route path="/report"        element={<ProtectedRoute><ForecastingReport /></ProtectedRoute>} />
-      <Route path="/admin"         element={<ProtectedRoute allowedRoles={['admin']}><AdminConsole /></ProtectedRoute>} />
+      {/* Admin: allow both 'admin' (existing auth flow) and 'demand_planning' (persona landing → Admin card) */}
+      <Route path="/admin"         element={<ProtectedRoute allowedRoles={['admin', 'demand_planning']}><AdminConsole /></ProtectedRoute>} />
       <Route path="/supply"            element={<ProtectedRoute allowedRoles={['demand_planning']}><SupplyPlanning /></ProtectedRoute>} />
       <Route path="/demand-planning"   element={<ProtectedRoute allowedRoles={['demand_planning']}><DemandPlanning /></ProtectedRoute>} />
       <Route path="*"              element={<Navigate to="/" replace />} />
@@ -70,29 +76,12 @@ function AppRoutes() {
   );
 }
 
-// Small helper used only for the "/" redirect — avoids calling useAuth in RoleHome
-// before isAuthenticated is confirmed.
 function AuthGate({ children }) {
   const { isAuthenticated } = useAuth();
   return isAuthenticated ? children : <Navigate to="/login" replace />;
 }
 
 // ── App shell ──────────────────────────────────────────────────────────────
-// Layout:
-//
-//  Desktop (≥768px)                    Mobile (<768px)
-//  ┌───────────────────────────────┐   ┌──────────────────────────┐
-//  │  KPIBar (full width)          │   │  KPIBar (full width)     │
-//  ├──────────┬────────────────────┤   ├──────────────────────────┤
-//  │ Sidebar  │  <main> (scroll)   │   │  Navbar (sticky header)  │
-//  │ (220px)  │                    │   │                          │
-//  │          │  <Routes />        │   │  <Routes />              │
-//  │          │                    │   │                          │
-//  └──────────┴────────────────────┘   │  bottom tabs (fixed)     │
-//                                      └──────────────────────────┘
-//
-// ProtectedRoute logic is identical to the original — this file only changes
-// how content is framed, not what is shown or who can see it.
 
 function AppLayout() {
   const { isAuthenticated } = useAuth();
@@ -106,29 +95,19 @@ function AppLayout() {
       overflow: 'hidden',
       background: 'var(--bg)',
     }}>
-
-      {/* KPIBar — always visible at top when authenticated.
-          KPIs requiring supply-chain data (inventory, supplier, production) show "--"
-          until those modules are built. Forecast Accuracy is available today. */}
       {isAuthenticated && (
         <KPIBar kpis={{}} />
       )}
 
-      {/* Body — sidebar (desktop) + scrollable content */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-
-        {/* Desktop sidebar */}
         {isAuthenticated && !isMobile && <Sidebar />}
 
-        {/* Content area */}
         <main style={{
           flex: 1,
           overflowY: 'auto',
           overflowX: 'hidden',
-          // Mobile: extra bottom padding so content isn't hidden behind fixed bottom tabs
           paddingBottom: isMobile ? 64 : 0,
         }}>
-          {/* Mobile top bar (Navbar guards itself with isMobile; returns null on desktop) */}
           {isAuthenticated && <Navbar />}
 
           <AppRoutes />
@@ -144,7 +123,6 @@ function AppLayout() {
             </footer>
           )}
         </main>
-
       </div>
     </div>
   );
@@ -156,9 +134,11 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <ToastProvider>
-          <AppLayout />
-        </ToastProvider>
+        <PersonaProvider>
+          <ToastProvider>
+            <AppLayout />
+          </ToastProvider>
+        </PersonaProvider>
       </AuthProvider>
     </BrowserRouter>
   );

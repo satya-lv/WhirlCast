@@ -332,10 +332,12 @@ function ConfirmRow({ label, value }) {
 
 // ── WhatIfTab ─────────────────────────────────────────────────────────────────
 
-export default function WhatIfTab({ filterOptions, onApplyComplete }) {
+export default function WhatIfTab({ filterOptions, lockedFilter, onApplyComplete }) {
   // Scenario slider state
   const [selectedSku,   setSelectedSku]   = useState('');
-  const [selectedLoc,   setSelectedLoc]   = useState('');
+  const [selectedLoc,   setSelectedLoc]   = useState(() =>
+    lockedFilter?.field === 'locationId' ? lockedFilter.value : ''
+  );
   const [discount,      setDiscount]      = useState(0);    // integer 0–50 (%)
   const [priceChange,   setPriceChange]   = useState(0);    // integer −20–+20 (%)
   const [marketingMult, setMarketingMult] = useState(1.0);  // float 0.5–2.0
@@ -571,7 +573,12 @@ export default function WhatIfTab({ filterOptions, onApplyComplete }) {
   };
 
   const locations = filterOptions?.locations || [];
-  const skus      = filterOptions?.skus      || [];
+  const skus = useMemo(() => {
+    const all = filterOptions?.skus || [];
+    if (lockedFilter?.field === 'skuFamily')
+      return all.filter(s => s.category === lockedFilter.value);
+    return all;
+  }, [filterOptions, lockedFilter]);
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
@@ -596,17 +603,24 @@ export default function WhatIfTab({ filterOptions, onApplyComplete }) {
           ))}
         </SelectorField>
 
-        <SelectorField
-          label="Branch"
-          value={selectedLoc}
-          onChange={v => { setSelectedLoc(v); setResult(null); }}
-          disabled={isLocked}
-        >
-          <option value="">— Select Branch —</option>
-          {locations.map(l => (
-            <option key={l.locationId} value={l.locationId}>{l.name}</option>
-          ))}
-        </SelectorField>
+        {lockedFilter?.field === 'locationId' ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.4px', color: 'var(--text-3)', textTransform: 'uppercase' }}>Branch</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-1)' }}>{lockedFilter.label}</span>
+          </div>
+        ) : (
+          <SelectorField
+            label="Branch"
+            value={selectedLoc}
+            onChange={v => { setSelectedLoc(v); setResult(null); }}
+            disabled={isLocked}
+          >
+            <option value="">— Select Branch —</option>
+            {locations.map(l => (
+              <option key={l.locationId} value={l.locationId}>{l.name}</option>
+            ))}
+          </SelectorField>
+        )}
 
         <span style={{ flex: 1 }} />
 

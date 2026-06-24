@@ -322,6 +322,24 @@ router.get('/constraints', (req, res) => {
     const scenarioId = parseInt(req.query.scenarioId) || getBaseline(db);
     const { start, end } = weekRange(req.query);
 
+    // Build optional persona-scope filters (same pattern as buildGridWhere)
+    const xConds  = [];
+    const xParams = [];
+    if (req.query.locationId) {
+      xConds.push('po.location_id = ?');
+      xParams.push(parseInt(req.query.locationId));
+    }
+    if (req.query.skuFamily && FAMILY_PATTERNS[req.query.skuFamily]) {
+      const skus = FAMILY_PATTERNS[req.query.skuFamily];
+      xConds.push(`po.sku IN (${skus.map(() => '?').join(',')})`);
+      xParams.push(...skus);
+    }
+    const xWhere = xConds.length ? 'AND ' + xConds.join(' AND ') : '';
+
+    // DEBUG — remove after diagnosis
+    console.log('[CONSTRAINTS] query:', JSON.stringify(req.query));
+    console.log('[CONSTRAINTS] xWhere:', xWhere || '(none)', 'xParams:', xParams);
+
     if (view === 'capacity') {
       // Aggregate capacity at the plant+line level across the week window
       const rows = db.prepare(`
@@ -347,9 +365,10 @@ router.get('/constraints', (req, res) => {
                ON dwd.sku=po.sku AND dwd.location_id=po.location_id AND dwd.week_number=po.week_number
         WHERE po.scenario_id=? AND po.year=2026
           AND po.week_number BETWEEN ? AND ?
+          ${xWhere}
         GROUP BY po.plant_id, po.production_line_id
         ORDER BY utilization_pct DESC`
-      ).all(end, start, end, start, scenarioId, start, end);
+      ).all(end, start, end, start, scenarioId, start, end, ...xParams);
 
       db.close();
       return res.json({ view: 'capacity', weekRange: { start, end }, rows });
@@ -380,9 +399,10 @@ router.get('/constraints', (req, res) => {
         JOIN suppliers s ON s.supplier_id = c.supplier_id
         WHERE po.scenario_id=? AND po.year=2026
           AND po.week_number BETWEEN ? AND ?
+          ${xWhere}
         GROUP BY c.component_id
         ORDER BY coverage_days ASC`
-      ).all(end, start, start, end, scenarioId, start, end);
+      ).all(end, start, start, end, scenarioId, start, end, ...xParams);
 
       db.close();
       return res.json({ view: 'material', weekRange: { start, end }, rows });
@@ -415,10 +435,11 @@ router.get('/constraints', (req, res) => {
                ON dwd.sku=po.sku AND dwd.location_id=po.location_id AND dwd.week_number=po.week_number
         WHERE po.scenario_id=? AND po.year=2026
           AND po.week_number BETWEEN ? AND ?
+          ${xWhere}
           AND (COALESCE(dwd.final_consensus, po.forecast_demand) - po.beginning_inventory - po.planned_production) > 0
         ORDER BY revenue_at_risk DESC
         LIMIT 50`
-      ).all(scenarioId, start, end);
+      ).all(scenarioId, start, end, ...xParams);
 
       // Aggregate summary
       const summary = db.prepare(`
@@ -434,8 +455,9 @@ router.get('/constraints', (req, res) => {
                ON dwd.sku=po.sku AND dwd.location_id=po.location_id AND dwd.week_number=po.week_number
         WHERE po.scenario_id=? AND po.year=2026
           AND po.week_number BETWEEN ? AND ?
+          ${xWhere}
           AND (COALESCE(dwd.final_consensus, po.forecast_demand) - po.beginning_inventory - po.planned_production) > 0`
-      ).get(scenarioId, start, end);
+      ).get(scenarioId, start, end, ...xParams);
 
       db.close();
       return res.json({ view: 'demand_impact', weekRange: { start, end }, summary, rows });
@@ -775,6 +797,24 @@ router.get('/recommendations', (req, res) => {
     const { start, end } = weekRange(req.query);
     const recs = [];
 
+    // Persona-scope filters
+    const rConds  = [];
+    const rParams = [];
+    if (req.query.locationId) {
+      rConds.push('po.location_id = ?');
+      rParams.push(parseInt(req.query.locationId));
+    }
+    if (req.query.skuFamily && FAMILY_PATTERNS[req.query.skuFamily]) {
+      const skus = FAMILY_PATTERNS[req.query.skuFamily];
+      rConds.push(`po.sku IN (${skus.map(() => '?').join(',')})`);
+      rParams.push(...skus);
+    }
+    const rWhere = rConds.length ? 'AND ' + rConds.join(' AND ') : '';
+
+    // DEBUG — remove after diagnosis
+    console.log('[RECS] query:', JSON.stringify(req.query));
+    console.log('[RECS] rWhere:', rWhere || '(none)', 'rParams:', rParams);
+
     // Load hours_per_unit map once
     const hpuRows = db.prepare(`SELECT sku, hours_per_unit FROM sku_planning_params`).all();
     const HPU = Object.fromEntries(hpuRows.map(r => [r.sku, r.hours_per_unit]));
@@ -795,11 +835,12 @@ router.get('/recommendations', (req, res) => {
       LEFT JOIN demand_weekly_data dwd
              ON dwd.sku=po.sku AND dwd.location_id=po.location_id AND dwd.week_number=po.week_number
       WHERE po.scenario_id=? AND po.year=2026 AND po.week_number BETWEEN ? AND ?
+        ${rWhere}
       GROUP BY po.plant_id, po.production_line_id, po.week_number
       HAVING total_req_hrs > line_cap_hrs AND total_shortage > 0
       ORDER BY total_shortage DESC
       LIMIT 8`
-    ).all(scenarioId, start, end);
+    ).all(scenarioId, start, end, ...rParams);
 
     for (const ci of capIssues) {
       const overloadHrs  = ci.total_req_hrs - ci.line_cap_hrs;
@@ -841,10 +882,11 @@ router.get('/recommendations', (req, res) => {
       FROM planning_orders po
       JOIN locations l ON po.location_id=l.location_id
       WHERE po.scenario_id=? AND po.year=2026 AND po.week_number BETWEEN ? AND ?
+        ${rWhere}
         AND po.material_availability < 14
       ORDER BY po.material_availability ASC
       LIMIT 6`
-    ).all(scenarioId, start, end);
+    ).all(scenarioId, start, end, ...rParams);
 
     for (const mi of matIssues) {
       const tightComp = db.prepare(`
@@ -906,10 +948,11 @@ router.get('/recommendations', (req, res) => {
       LEFT JOIN demand_weekly_data dwd
              ON dwd.sku=po.sku AND dwd.location_id=po.location_id AND dwd.week_number=po.week_number
       WHERE po.scenario_id=? AND po.year=2026 AND po.week_number BETWEEN ? AND ?
+        ${rWhere}
         AND (COALESCE(dwd.final_consensus, po.forecast_demand) - po.beginning_inventory - po.planned_production) > 10
       ORDER BY revenue_at_risk DESC
       LIMIT 5`
-    ).all(scenarioId, start, end);
+    ).all(scenarioId, start, end, ...rParams);
 
     for (const ii of invIssues) {
       const futureWeek = Math.min(52, ii.week_number + 2);
@@ -1167,7 +1210,13 @@ router.get('/whatif/candidates', (req, res) => {
       ORDER BY total_shortage DESC
     `).all(scenarioId, start, end);
 
-    const { abcClass, xyzClass, severity } = req.query;
+    const { abcClass, xyzClass, severity, locationId: candLocId, skuFamily: candFamily } = req.query;
+    const familySkus = candFamily && FAMILY_PATTERNS[candFamily] ? new Set(FAMILY_PATTERNS[candFamily]) : null;
+
+    // DEBUG — remove after diagnosis
+    console.log('[CANDIDATES] query:', JSON.stringify(req.query));
+    console.log('[CANDIDATES] candLocId:', candLocId, 'candFamily:', candFamily, 'familySkus:', familySkus ? [...familySkus] : null);
+    console.log('[CANDIDATES] raw row count before filter:', rows.length);
     const candidates = rows
       .map(r => {
         const pct = r.total_demand > 0 ? r.total_shortage / r.total_demand : 0;
@@ -1175,9 +1224,11 @@ router.get('/whatif/candidates', (req, res) => {
         return { ...r, severity: sev, severityPct: Math.round(pct * 100) };
       })
       .filter(r => {
-        if (abcClass && r.abc_class !== abcClass) return false;
-        if (xyzClass && r.xyz_class !== xyzClass) return false;
-        if (severity && r.severity !== severity)   return false;
+        if (abcClass    && r.abc_class   !== abcClass)                  return false;
+        if (xyzClass    && r.xyz_class   !== xyzClass)                  return false;
+        if (severity    && r.severity    !== severity)                   return false;
+        if (candLocId   && r.location_id !== parseInt(candLocId))       return false;
+        if (familySkus  && !familySkus.has(r.sku))                      return false;
         return true;
       });
 

@@ -11,6 +11,8 @@
 import React, {
   useState, useEffect, useRef, useLayoutEffect, useCallback,
 } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { usePersona, getLockedFilter } from '../context/PersonaContext';
 import DemandGrid from '../components/demand/DemandGrid';
 import PatternsTab from '../components/demand/PatternsTab';
 import ExceptionsTab from '../components/demand/ExceptionsTab';
@@ -63,8 +65,11 @@ async function fetchAllGridPages(filters, weekStart = 24) {
   return { rows: all, weeks: d1.weeks, editableFrom: d1.weekRange?.editableFrom ?? 24 };
 }
 
-async function fetchExceptions() {
-  const r = await fetch('/api/demand-planning/exceptions?acknowledged=0');
+async function fetchExceptions(filters) {
+  const p = new URLSearchParams({ acknowledged: 0 });
+  if (filters?.locationId) p.set('locationId', filters.locationId);
+  if (filters?.skuFamily)  p.set('skuFamily',  filters.skuFamily);
+  const r = await fetch(`/api/demand-planning/exceptions?${p}`);
   if (!r.ok) throw new Error(`exceptions ${r.status}`);
   return r.json();
 }
@@ -192,7 +197,13 @@ function FSelect({ label, value, onChange, children }) {
   );
 }
 
-function DemandFilterBar({ filters, onChange, options }) {
+const lockedText = (label) => (
+  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-1)', flexShrink: 0 }}>
+    {label}
+  </span>
+);
+
+function DemandFilterBar({ filters, onChange, options, lockedField, lockedLabel }) {
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
@@ -200,19 +211,29 @@ function DemandFilterBar({ filters, onChange, options }) {
       background: 'var(--card)', borderBottom: '1px solid var(--border)',
       flexShrink: 0,
     }}>
-      <FSelect label="Branch" value={filters.locationId} onChange={v => onChange({ ...filters, locationId: v })}>
-        <option value="">All Branches</option>
-        {(options?.locations || []).map(l => (
-          <option key={l.locationId} value={l.locationId}>{l.name}</option>
-        ))}
-      </FSelect>
+      {lockedField === 'locationId'
+        ? lockedText(lockedLabel)
+        : (
+          <FSelect label="Branch" value={filters.locationId} onChange={v => onChange({ ...filters, locationId: v })}>
+            <option value="">All Branches</option>
+            {(options?.locations || []).map(l => (
+              <option key={l.locationId} value={String(l.locationId)}>{l.name}</option>
+            ))}
+          </FSelect>
+        )
+      }
 
-      <FSelect label="Product Group" value={filters.skuFamily} onChange={v => onChange({ ...filters, skuFamily: v })}>
-        <option value="">All Groups</option>
-        {(options?.skuFamilies || []).map(f => (
-          <option key={f} value={f}>{f}</option>
-        ))}
-      </FSelect>
+      {lockedField === 'skuFamily'
+        ? lockedText(lockedLabel)
+        : (
+          <FSelect label="Product Group" value={filters.skuFamily} onChange={v => onChange({ ...filters, skuFamily: v })}>
+            <option value="">All Groups</option>
+            {(options?.skuFamilies || []).map(f => (
+              <option key={f} value={f}>{f}</option>
+            ))}
+          </FSelect>
+        )
+      }
 
       <FSelect label="SKU" value={filters.sku} onChange={v => onChange({ ...filters, sku: v })}>
         <option value="">All SKUs</option>
@@ -291,10 +312,16 @@ function TabBar({ activeTab, onSelect }) {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function DemandPlanning() {
+  const navigate = useNavigate();
+  const { persona, setPersona } = usePersona();
+  const lockedFilter = getLockedFilter(persona?.role, 'demand');
+
   const [filterOptions, setFilterOptions] = useState(null);
-  const [filters, setFilters] = useState({
-    locationId: '', skuFamily: '', sku: '', abcClass: '', xyzClass: '',
-  });
+  const [filters, setFilters] = useState(() => ({
+    locationId: lockedFilter?.field === 'locationId' ? lockedFilter.value : '',
+    skuFamily:  lockedFilter?.field === 'skuFamily'  ? lockedFilter.value : '',
+    sku: '', abcClass: '', xyzClass: '',
+  }));
   const [kpis,       setKpis]       = useState(null);
   const [kpiLoading, setKpiLoading] = useState(false);
   const [gridRows,   setGridRows]   = useState([]);
@@ -411,15 +438,13 @@ export default function DemandPlanning() {
     loadPatterns();
   }, [activeTab, loadPatterns]);
 
-  // Fetch exceptions when Exceptions tab becomes active.
-  // Portfolio-wide (not filtered) — matches the KPI bar's Open Exceptions count.
   const loadExceptions = useCallback(() => {
     setExceptionsLoading(true);
-    fetchExceptions()
+    fetchExceptions(filters)
       .then(d => setExceptionsData(d))
       .catch(() => setExceptionsData(null))
       .finally(() => setExceptionsLoading(false));
-  }, []); // no filter deps — exceptions are portfolio-wide
+  }, [filters]);
 
   useEffect(() => {
     if (activeTab !== 'exceptions') return;
@@ -503,7 +528,13 @@ export default function DemandPlanning() {
       <DemandKPIStrip kpis={kpis} loading={kpiLoading} />
 
       {/* Filter bar */}
-      <DemandFilterBar filters={filters} onChange={setFilters} options={filterOptions} />
+      <DemandFilterBar
+        filters={filters}
+        onChange={setFilters}
+        options={filterOptions}
+        lockedField={lockedFilter?.field}
+        lockedLabel={lockedFilter?.label}
+      />
 
       {/* Tab navigation */}
       <TabBar activeTab={activeTab} onSelect={setActiveTab} />
@@ -559,6 +590,7 @@ export default function DemandPlanning() {
       }}>
         <WhatIfTab
           filterOptions={filterOptions}
+          lockedFilter={lockedFilter}
           onApplyComplete={() => { refreshKPIs(); markGridDirty(); }}
         />
       </div>
@@ -581,8 +613,29 @@ export default function DemandPlanning() {
         display: activeTab === 'npi' ? 'flex' : 'none',
         flexDirection: 'column',
       }}>
-        <NPITab />
+        <NPITab lockedSkuFamily={lockedFilter?.field === 'skuFamily' ? lockedFilter.value : null} />
       </div>
+
+      {/* Cross-module CTA — only when entering via persona flow */}
+      {persona?.role && (
+        <button
+          onClick={() => {
+            setPersona({ module: 'supply' });
+            navigate('/supply');
+          }}
+          style={{
+            position: 'fixed', bottom: 24, right: 24, zIndex: 50,
+            background: 'var(--navy)', color: 'white',
+            border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: 24, padding: '10px 18px',
+            fontSize: 12, fontWeight: 600, cursor: 'pointer',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+            display: 'flex', alignItems: 'center', gap: 6,
+          }}
+        >
+          Switch to Supply Planning →
+        </button>
+      )}
     </div>
   );
 }
