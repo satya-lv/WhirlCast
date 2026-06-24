@@ -13,6 +13,7 @@ import React, {
 } from 'react';
 import DemandGrid from '../components/demand/DemandGrid';
 import PatternsTab from '../components/demand/PatternsTab';
+import ExceptionsTab from '../components/demand/ExceptionsTab';
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 
@@ -58,6 +59,12 @@ async function fetchAllGridPages(filters) {
     for (const d of rest) all.push(...d.rows);
   }
   return { rows: all, weeks: d1.weeks, editableFrom: d1.weekRange?.editableFrom ?? 27 };
+}
+
+async function fetchExceptions() {
+  const r = await fetch('/api/demand-planning/exceptions?acknowledged=0');
+  if (!r.ok) throw new Error(`exceptions ${r.status}`);
+  return r.json();
 }
 
 async function fetchPatterns(filters) {
@@ -231,7 +238,7 @@ const TABS = [
   { id: 'grid',       label: 'Forecast Grid',    active: true  },
   { id: 'patterns',   label: 'Patterns',         active: true  },
   { id: 'whatif',     label: 'What-If',          active: false },
-  { id: 'exceptions', label: 'Exceptions',       active: false },
+  { id: 'exceptions', label: 'Exceptions',       active: true  },
   { id: 'npi',        label: 'NPI Forecasting',  active: false },
 ];
 
@@ -308,9 +315,11 @@ export default function DemandPlanning() {
   const [editableFrom, setEditableFrom] = useState(27);
   const [activeTab,  setActiveTab]  = useState('grid');
   const [error,      setError]      = useState(null);
-  const [patternsData,    setPatternsData]    = useState(null);
-  const [patternsLoading, setPatternsLoading] = useState(false);
-  const [recalculating,   setRecalculating]   = useState(false);
+  const [patternsData,      setPatternsData]      = useState(null);
+  const [patternsLoading,   setPatternsLoading]   = useState(false);
+  const [recalculating,     setRecalculating]     = useState(false);
+  const [exceptionsData,    setExceptionsData]    = useState(null);
+  const [exceptionsLoading, setExceptionsLoading] = useState(false);
 
   const gridContainerRef = useRef();
   const [gridDims, setGridDims] = useState({ height: 500, width: 900 });
@@ -391,6 +400,37 @@ export default function DemandPlanning() {
     if (activeTab !== 'patterns') return;
     loadPatterns();
   }, [activeTab, loadPatterns]);
+
+  // Fetch exceptions when Exceptions tab becomes active.
+  // Portfolio-wide (not filtered) — matches the KPI bar's Open Exceptions count.
+  const loadExceptions = useCallback(() => {
+    setExceptionsLoading(true);
+    fetchExceptions()
+      .then(d => setExceptionsData(d))
+      .catch(() => setExceptionsData(null))
+      .finally(() => setExceptionsLoading(false));
+  }, []); // no filter deps — exceptions are portfolio-wide
+
+  useEffect(() => {
+    if (activeTab !== 'exceptions') return;
+    loadExceptions();
+  }, [activeTab, loadExceptions]);
+
+  const handleAcknowledge = useCallback(async (exceptionId) => {
+    const res = await fetch(`/api/demand-planning/exceptions/${exceptionId}/acknowledge`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ acknowledged: 1 }),
+    });
+    if (!res.ok) throw new Error(`acknowledge ${res.status}`);
+    // Optimistic: remove from local list immediately — no re-fetch needed
+    setExceptionsData(prev => prev ? {
+      ...prev,
+      exceptions: prev.exceptions.filter(e => e.exceptionId !== exceptionId),
+    } : prev);
+    // Decrement Open Exceptions on the KPI bar
+    refreshKPIs();
+  }, [refreshKPIs]);
 
   const handleRecalculate = useCallback(async () => {
     setRecalculating(true);
@@ -515,8 +555,21 @@ export default function DemandPlanning() {
         />
       </div>
 
+      {/* Exceptions tab — always mounted; display:none preserves category filter + acknowledged state */}
+      <div style={{
+        flex: 1, minHeight: 0, overflowY: 'auto',
+        display: activeTab === 'exceptions' ? 'flex' : 'none',
+        flexDirection: 'column',
+      }}>
+        <ExceptionsTab
+          data={exceptionsData}
+          loading={exceptionsLoading}
+          onAcknowledge={handleAcknowledge}
+        />
+      </div>
+
       {/* Placeholder tabs for not-yet-built tabs */}
-      {['whatif', 'exceptions', 'npi'].includes(activeTab) && (
+      {['whatif', 'npi'].includes(activeTab) && (
         <PlaceholderTab label={TABS.find(t => t.id === activeTab)?.label || activeTab} />
       )}
     </div>
