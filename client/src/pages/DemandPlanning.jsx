@@ -15,6 +15,7 @@ import DemandGrid from '../components/demand/DemandGrid';
 import PatternsTab from '../components/demand/PatternsTab';
 import ExceptionsTab from '../components/demand/ExceptionsTab';
 import WhatIfTab from '../components/demand/WhatIfTab';
+import NPITab from '../components/demand/NPITab';
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 
@@ -240,7 +241,7 @@ const TABS = [
   { id: 'patterns',   label: 'Patterns',         active: true  },
   { id: 'whatif',     label: 'What-If',          active: true  },
   { id: 'exceptions', label: 'Exceptions',       active: true  },
-  { id: 'npi',        label: 'NPI Forecasting',  active: false },
+  { id: 'npi',        label: 'NPI Forecasting',  active: true  },
 ];
 
 function TabBar({ activeTab, onSelect }) {
@@ -286,20 +287,6 @@ function TabBar({ activeTab, onSelect }) {
   );
 }
 
-// ── Placeholder tab content ───────────────────────────────────────────────────
-
-function PlaceholderTab({ label }) {
-  return (
-    <div style={{
-      flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-      flexDirection: 'column', gap: 8, color: 'var(--text-3)',
-    }}>
-      <span style={{ fontSize: 32, opacity: 0.3 }}>🔧</span>
-      <span style={{ fontSize: 14, fontWeight: 600 }}>{label}</span>
-      <span style={{ fontSize: 12 }}>Coming in a future step</span>
-    </div>
-  );
-}
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
@@ -602,10 +589,14 @@ export default function DemandPlanning() {
         />
       </div>
 
-      {/* Placeholder tab for not-yet-built NPI tab */}
-      {activeTab === 'npi' && (
-        <PlaceholderTab label={TABS.find(t => t.id === 'npi')?.label || 'NPI Forecasting'} />
-      )}
+      {/* NPI Forecasting tab — always mounted; display:none preserves LFL selection + computed state */}
+      <div style={{
+        flex: 1, minHeight: 0, overflowY: 'auto',
+        display: activeTab === 'npi' ? 'flex' : 'none',
+        flexDirection: 'column',
+      }}>
+        <NPITab />
+      </div>
     </div>
   );
 }

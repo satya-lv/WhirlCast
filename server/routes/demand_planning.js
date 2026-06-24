@@ -1,6 +1,6 @@
 'use strict';
 /**
- * demand_planning.js — Demand Planning Workbench API (Step A.2 + A.3.4)
+ * demand_planning.js — Demand Planning Workbench API (Step A.2 + A.3.5)
  *
  * Endpoints:
  *   GET   /api/demand-planning/filters
@@ -12,6 +12,7 @@
  *   GET   /api/demand-planning/exceptions
  *   PATCH /api/demand-planning/exceptions/:id/acknowledge
  *   POST  /api/demand-planning/whatif
+ *   GET   /api/demand-planning/npi/predecessor-stats
  */
 const express = require('express');
 const router  = express.Router();
@@ -765,6 +766,40 @@ router.post('/whatif', (req, res) => {
         revenueImpact:  sumScenRev - sumBaseRev,
       },
       weeks,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/demand-planning/npi/predecessor-stats ────────────────────────────
+// Returns monthly demand stats for a SKU from demand_weekly_data (2025).
+// Called by NPITab when an LFL predecessor is selected: the frontend passes
+// the NEW sku (LFL replacement) because the old predecessor SKU has no rows
+// in demand_weekly_data — the replacement's history is the LFL baseline.
+
+router.get('/npi/predecessor-stats', (req, res) => {
+  const { sku } = req.query;
+  if (!sku) return res.status(400).json({ error: 'sku query param required' });
+  try {
+    const db  = getDb();
+    const row = db.prepare(`
+      SELECT
+        sku,
+        SUM(actual_sales)              AS totalAnnualUnits,
+        COUNT(*)                       AS weeks,
+        SUM(actual_sales) * 12.0 / 52  AS avgMonthlyUnits
+      FROM demand_weekly_data
+      WHERE sku = ? AND year = ?
+    `).get(sku, DEMAND_YEAR);
+    db.close();
+    if (!row || row.totalAnnualUnits == null) {
+      return res.status(404).json({ error: `No demand data found for SKU: ${sku}` });
+    }
+    res.json({
+      sku:              row.sku,
+      avgMonthlyUnits:  Math.round(row.avgMonthlyUnits),
+      totalAnnualUnits: Math.round(row.totalAnnualUnits),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
