@@ -193,9 +193,6 @@ function seedDemand(force = false) {
   })();
   console.log(`[seed_demand] Inserted ${allRows.length} weekly demand rows (${SKUS.length} SKUs × ${LOCATIONS.length} locations × 52 weeks).`);
 
-  // ── ABC/XYZ ──────────────────────────────────────────────────────────────
-  computeAbcXyzClassification(db);
-
   // ── Exceptions ───────────────────────────────────────────────────────────
   const insertExc = db.prepare(`
     INSERT INTO demand_exceptions
