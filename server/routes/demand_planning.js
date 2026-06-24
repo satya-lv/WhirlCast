@@ -1,6 +1,6 @@
 'use strict';
 /**
- * demand_planning.js — Demand Planning Workbench API (Step A.2)
+ * demand_planning.js — Demand Planning Workbench API (Step A.2 + A.3.4)
  *
  * Endpoints:
  *   GET   /api/demand-planning/filters
@@ -11,6 +11,7 @@
  *   POST  /api/demand-planning/patterns/recalculate-classification
  *   GET   /api/demand-planning/exceptions
  *   PATCH /api/demand-planning/exceptions/:id/acknowledge
+ *   POST  /api/demand-planning/whatif
  */
 const express = require('express');
 const router  = express.Router();
@@ -660,6 +661,111 @@ router.patch('/exceptions/:id/acknowledge', (req, res) => {
       return res.status(404).json({ error: `Exception ${id} not found` });
     }
     res.json({ success: true, exceptionId: id, acknowledged: acknowledged ? 1 : 0 });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/demand-planning/whatif ─────────────────────────────────────────
+// What-If scenario simulation. Applies 3 slider inputs to the base forecast
+// (final_consensus) for a selected SKU-location over forward weeks (27–52).
+//
+// Formula per forward week w:
+//   promoLift_w = finalConsensus_w × d × 1.7 × m
+//   priceLift_w = finalConsensus_w × (−2.0) × p
+//   scenarioVol_w = max(0, finalConsensus_w + promoLift_w + priceLift_w)
+//   scenarioRev_w = scenarioVol_w × unitPrice × (1 + p)
+//
+// Where: d = promotionDiscount (0–0.50), p = priceChange (−0.20–0.20),
+//        m = marketingMultiplier (0.5–2.0). PROMO_COEFF = 1.7 (10% off → 17% lift).
+//        ELASTICITY = −2.0 (own-price, durable appliances; range −1.5 to −2.5).
+
+router.post('/whatif', (req, res) => {
+  try {
+    const {
+      sku,
+      locationId,
+      promotionDiscount   = 0,
+      priceChange         = 0,
+      marketingMultiplier = 1.0,
+    } = req.body || {};
+
+    if (!sku || locationId == null) {
+      return res.status(400).json({ error: 'sku and locationId are required' });
+    }
+
+    const d = parseFloat(promotionDiscount);
+    const p = parseFloat(priceChange);
+    const m = parseFloat(marketingMultiplier);
+
+    if (isNaN(d) || d < 0 || d > 0.50)  return res.status(400).json({ error: 'promotionDiscount must be 0–0.50' });
+    if (isNaN(p) || p < -0.20 || p > 0.20) return res.status(400).json({ error: 'priceChange must be −0.20–+0.20' });
+    if (isNaN(m) || m < 0.5 || m > 2.0) return res.status(400).json({ error: 'marketingMultiplier must be 0.5–2.0' });
+
+    const PROMO_COEFF = 1.7;   // approved: 10% discount → 17% volume lift
+    const ELASTICITY  = -2.0;  // own-price elasticity for durable appliances
+
+    const db = getDb();
+
+    const pm = db.prepare('SELECT price, category FROM product_master WHERE sku = ?').get(sku);
+    if (!pm) { db.close(); return res.status(404).json({ error: `SKU ${sku} not found` }); }
+
+    const loc = db.prepare('SELECT name FROM locations WHERE location_id = ?').get(parseInt(locationId));
+    if (!loc) { db.close(); return res.status(404).json({ error: `Location ${locationId} not found` }); }
+
+    const rows = db.prepare(`
+      SELECT week_number,
+             system_forecast   AS systemForecast,
+             final_consensus   AS baseVolume
+      FROM   demand_weekly_data
+      WHERE  sku = ? AND location_id = ? AND year = ? AND week_number >= ?
+      ORDER  BY week_number
+    `).all(sku, parseInt(locationId), DEMAND_YEAR, EDITABLE_FROM_WEEK);
+
+    db.close();
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: `No forecast data for ${sku} at location ${locationId}` });
+    }
+
+    const weeks = rows.map(row => {
+      const base      = row.baseVolume;
+      const promoLift = base * d * PROMO_COEFF * m;
+      const priceLift = base * ELASTICITY * p;
+      const scenVol   = Math.max(0, Math.round(base + promoLift + priceLift));
+      return {
+        weekNumber:     row.week_number,
+        systemForecast: Math.round(row.systemForecast),  // needed for apply: new_adj = scenarioVol - systemForecast
+        baseVolume:     Math.round(base),
+        scenarioVolume: scenVol,
+        baseRevenue:    Math.round(base * pm.price),
+        scenarioRevenue: Math.round(scenVol * pm.price * (1 + p)),
+      };
+    });
+
+    const sumBase    = weeks.reduce((s, w) => s + w.baseVolume,     0);
+    const sumScen    = weeks.reduce((s, w) => s + w.scenarioVolume, 0);
+    const sumBaseRev = weeks.reduce((s, w) => s + w.baseRevenue,    0);
+    const sumScenRev = weeks.reduce((s, w) => s + w.scenarioRevenue, 0);
+
+    res.json({
+      sku,
+      locationName: loc.name,
+      unitPrice:    pm.price,
+      inputs:       { promotionDiscount: d, priceChange: p, marketingMultiplier: m },
+      summary: {
+        baseVolume:     sumBase,
+        scenarioVolume: sumScen,
+        volumeImpact:   sumScen - sumBase,
+        volumeImpactPct: sumBase > 0
+          ? +((sumScen - sumBase) / sumBase * 100).toFixed(1)
+          : 0,
+        baseRevenue:    sumBaseRev,
+        scenarioRevenue: sumScenRev,
+        revenueImpact:  sumScenRev - sumBaseRev,
+      },
+      weeks,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

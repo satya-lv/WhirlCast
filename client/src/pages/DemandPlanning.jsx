@@ -14,6 +14,7 @@ import React, {
 import DemandGrid from '../components/demand/DemandGrid';
 import PatternsTab from '../components/demand/PatternsTab';
 import ExceptionsTab from '../components/demand/ExceptionsTab';
+import WhatIfTab from '../components/demand/WhatIfTab';
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 
@@ -237,7 +238,7 @@ function DemandFilterBar({ filters, onChange, options }) {
 const TABS = [
   { id: 'grid',       label: 'Forecast Grid',    active: true  },
   { id: 'patterns',   label: 'Patterns',         active: true  },
-  { id: 'whatif',     label: 'What-If',          active: false },
+  { id: 'whatif',     label: 'What-If',          active: true  },
   { id: 'exceptions', label: 'Exceptions',       active: true  },
   { id: 'npi',        label: 'NPI Forecasting',  active: false },
 ];
@@ -386,6 +387,27 @@ export default function DemandPlanning() {
       .catch(() => {})
       .finally(() => setKpiLoading(false));
   }, [filters]);
+
+  // Re-fetch grid when user switches back to it — ensures post-apply data is visible.
+  // (Grid normally re-fetches only on filter change; tab switch bypasses that.)
+  const gridNeedsRefresh = useRef(false);
+
+  const markGridDirty = useCallback(() => { gridNeedsRefresh.current = true; }, []);
+
+  useEffect(() => {
+    if (activeTab !== 'grid') return;
+    if (!gridNeedsRefresh.current) return;
+    gridNeedsRefresh.current = false;
+    setGridLoading(true);
+    fetchAllGridPages(filters)
+      .then(({ rows, weeks, editableFrom: ef }) => {
+        setGridRows(rows);
+        setGridWeeks(weeks);
+        setEditableFrom(ef);
+      })
+      .catch(err => setError(err.message))
+      .finally(() => setGridLoading(false));
+  }, [activeTab, filters]);
 
   // Fetch patterns data when Patterns tab is active (or when filters change while on it)
   const loadPatterns = useCallback(() => {
@@ -555,6 +577,18 @@ export default function DemandPlanning() {
         />
       </div>
 
+      {/* What-If tab — always mounted; display:none preserves SKU/location selection + slider state */}
+      <div style={{
+        flex: 1, minHeight: 0, overflowY: 'auto',
+        display: activeTab === 'whatif' ? 'flex' : 'none',
+        flexDirection: 'column',
+      }}>
+        <WhatIfTab
+          filterOptions={filterOptions}
+          onApplyComplete={() => { refreshKPIs(); markGridDirty(); }}
+        />
+      </div>
+
       {/* Exceptions tab — always mounted; display:none preserves category filter + acknowledged state */}
       <div style={{
         flex: 1, minHeight: 0, overflowY: 'auto',
@@ -568,9 +602,9 @@ export default function DemandPlanning() {
         />
       </div>
 
-      {/* Placeholder tabs for not-yet-built tabs */}
-      {['whatif', 'npi'].includes(activeTab) && (
-        <PlaceholderTab label={TABS.find(t => t.id === activeTab)?.label || activeTab} />
+      {/* Placeholder tab for not-yet-built NPI tab */}
+      {activeTab === 'npi' && (
+        <PlaceholderTab label={TABS.find(t => t.id === 'npi')?.label || 'NPI Forecasting'} />
       )}
     </div>
   );
