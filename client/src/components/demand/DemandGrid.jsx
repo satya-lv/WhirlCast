@@ -9,10 +9,12 @@
  * Hierarchy:
  *   SKU (collapsed by default)
  *   └── Location (expands when SKU is open)
- *       ├── Actual Sales     (read-only)
- *       ├── System Forecast  (read-only)
- *       ├── Planner Adj      (editable: double-click on weeks >= editableFrom)
- *       └── Final Consensus  (read-only)
+ *       ├── Actual Sales        (read-only)
+ *       ├── System Forecast     (read-only)
+ *       ├── Marketing Adj       (editable per persona)
+ *       ├── Branch Adj          (editable per persona)
+ *       ├── Category Adj        (editable per persona)
+ *       └── Final Consensus     (read-only; = System + Mktg + Branch + Cat)
  */
 import React, {
   useState, useMemo, useRef, useCallback, memo, forwardRef,
@@ -31,10 +33,12 @@ const TOOLBAR_H = 33;
 // ── Measure definitions ───────────────────────────────────────────────────────
 
 const DEMAND_MEASURES = [
-  { key: 'actualSales',       label: 'Actual Sales',    fmt: 'int' },
-  { key: 'systemForecast',    label: 'System Forecast', fmt: 'int' },
-  { key: 'plannerAdjustment', label: 'Planner Adj',     fmt: 'int', editable: true },
-  { key: 'finalConsensus',    label: 'Final Consensus', fmt: 'int' },
+  { key: 'actualSales',          label: 'Actual Sales',    fmt: 'int' },
+  { key: 'systemForecast',       label: 'System Forecast', fmt: 'int' },
+  { key: 'marketingAdjustment',  label: 'Marketing Adj',   fmt: 'int', editable: true },
+  { key: 'branchAdjustment',     label: 'Branch Adj',      fmt: 'int', editable: true },
+  { key: 'categoryAdjustment',   label: 'Category Adj',    fmt: 'int', editable: true },
+  { key: 'finalConsensus',       label: 'Final Consensus', fmt: 'int' },
 ];
 
 const PRIMARY_MEASURE = 'finalConsensus';
@@ -45,7 +49,7 @@ function buildTree(apiRows) {
   const skuOrder = [];
   const locOrder = new Map();  // sku → [locationId]
   const locMeta  = new Map();  // locKey → { name, region, abcClass, xyzClass }
-  const leafData = new Map();  // locKey → { [week]: { actualSales, systemForecast, plannerAdjustment, finalConsensus } }
+  const leafData = new Map();  // locKey → { [week]: { actualSales, systemForecast, marketingAdjustment, branchAdjustment, categoryAdjustment, finalConsensus } }
   const skuAgg   = new Map();  // sku → { [week]: { mk: summed value } }
 
   for (const row of apiRows) {
@@ -62,10 +66,12 @@ function buildTree(apiRows) {
     for (const [wkStr, cell] of Object.entries(cells)) {
       const w = parseInt(wkStr, 10);
       wmap[w] = {
-        actualSales:       cell.actualSales       ?? 0,
-        systemForecast:    cell.systemForecast    ?? 0,
-        plannerAdjustment: cell.plannerAdjustment ?? 0,
-        finalConsensus:    cell.finalConsensus    ?? 0,
+        actualSales:         cell.actualSales         ?? 0,
+        systemForecast:      cell.systemForecast      ?? 0,
+        marketingAdjustment: cell.marketingAdjustment ?? 0,
+        branchAdjustment:    cell.branchAdjustment    ?? 0,
+        categoryAdjustment:  cell.categoryAdjustment  ?? 0,
+        finalConsensus:      cell.finalConsensus      ?? 0,
       };
     }
     leafData.set(locKey, wmap);
@@ -78,11 +84,13 @@ function buildTree(apiRows) {
       const locKey = `${sku}|${locId}`;
       for (const [wStr, vals] of Object.entries(leafData.get(locKey) || {})) {
         const w = parseInt(wStr, 10);
-        if (!agg[w]) agg[w] = { actualSales: 0, systemForecast: 0, plannerAdjustment: 0, finalConsensus: 0 };
-        agg[w].actualSales       += vals.actualSales;
-        agg[w].systemForecast    += vals.systemForecast;
-        agg[w].plannerAdjustment += vals.plannerAdjustment;
-        agg[w].finalConsensus    += vals.finalConsensus;
+        if (!agg[w]) agg[w] = { actualSales: 0, systemForecast: 0, marketingAdjustment: 0, branchAdjustment: 0, categoryAdjustment: 0, finalConsensus: 0 };
+        agg[w].actualSales          += vals.actualSales;
+        agg[w].systemForecast       += vals.systemForecast;
+        agg[w].marketingAdjustment  += vals.marketingAdjustment;
+        agg[w].branchAdjustment     += vals.branchAdjustment;
+        agg[w].categoryAdjustment   += vals.categoryAdjustment;
+        agg[w].finalConsensus       += vals.finalConsensus;
       }
     }
     skuAgg.set(sku, agg);
@@ -156,12 +164,19 @@ const ROW_STYLES = {
 const INDENTS = { sku: 10, location: 22, measure: 32 };
 
 function getCellHighlight(measureKey, value, week, editableFrom) {
-  if (measureKey === 'plannerAdjustment') {
-    if (week < editableFrom) return '#F8FAFC';   // locked historical — subtle tint
-    if (value > 0)  return '#DCFCE7';            // upward adjustment — light green
-    if (value < 0)  return '#FEF9C3';            // downward adjustment — light amber
+  if (measureKey === 'marketingAdjustment' || measureKey === 'branchAdjustment' || measureKey === 'categoryAdjustment') {
+    if (week < editableFrom) return '#F8FAFC';
+    if (value > 0)  return '#DCFCE7';
+    if (value < 0)  return '#FEF9C3';
   }
   return null;
+}
+
+function isEditableForPersona(measureKey, personaRole) {
+  if (!personaRole || personaRole === 'demand_planner') return true;
+  if (personaRole === 'branch_manager')   return measureKey === 'branchAdjustment';
+  if (personaRole === 'category_manager') return measureKey === 'categoryAdjustment';
+  return true;
 }
 
 // ── NoScrollOuter (same pattern as PlanningGrid) ──────────────────────────────
@@ -228,7 +243,7 @@ const LeftCell = memo(function LeftCell({ index, style, data }) {
 // ── Right cell ────────────────────────────────────────────────────────────────
 
 const RightCell = memo(function RightCell({ columnIndex, rowIndex, style, data }) {
-  const { flatRows, weeks, tree, editableFrom, onBeginEdit } = data;
+  const { flatRows, weeks, tree, editableFrom, onBeginEdit, personaRole } = data;
   const row  = flatRows[rowIndex];
   const week = weeks[columnIndex];
 
@@ -245,7 +260,8 @@ const RightCell = memo(function RightCell({ columnIndex, rowIndex, style, data }
   const highlight = row.type === 'measure'
     ? getCellHighlight(row.measureKey, value, week, editableFrom)
     : null;
-  const isEditable = row.type === 'measure' && row.editable && week >= editableFrom;
+  const isEditable = row.type === 'measure' && row.editable && week >= editableFrom
+    && isEditableForPersona(row.measureKey, personaRole);
   const displayStr = row.type === 'measure' && row.measureKey === 'actualSales' && week >= 24
     ? '—'
     : formatVal(value, row.measureFmt || 'int');
@@ -340,6 +356,7 @@ export default function DemandGrid({
   width = 900,
   showHistory = false,
   onToggleHistory,
+  personaRole = null,
 }) {
   const [expandedSkus, setExpandedSkus] = useState(new Set());
   const [expandedLocs, setExpandedLocs] = useState(new Set());
@@ -418,8 +435,8 @@ export default function DemandGrid({
   }), [flatRows, expandedSkus, expandedLocs, toggleSku, toggleLoc]);
 
   const rightData = useMemo(() => ({
-    flatRows, weeks, tree, editableFrom, onBeginEdit: handleBeginEdit,
-  }), [flatRows, weeks, tree, editableFrom, handleBeginEdit]);
+    flatRows, weeks, tree, editableFrom, onBeginEdit: handleBeginEdit, personaRole,
+  }), [flatRows, weeks, tree, editableFrom, handleBeginEdit, personaRole]);
 
   const totalColsW = weeks.length * COL_W;
   const dataH      = height - HDR_H - TOOLBAR_H;

@@ -9,7 +9,7 @@
  * - Tabs use display:none (not unmount) so Grid scroll/expand state is preserved
  */
 import React, {
-  useState, useEffect, useRef, useLayoutEffect, useCallback,
+  useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo,
 } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usePersona, getLockedFilter } from '../context/PersonaContext';
@@ -203,7 +203,10 @@ const lockedText = (label) => (
   </span>
 );
 
-function DemandFilterBar({ filters, onChange, options, lockedField, lockedLabel }) {
+function DemandFilterBar({
+  filters, onChange, options, lockedField, lockedLabel,
+  personaRole, severityBucket, onSeverityChange,
+}) {
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
@@ -251,6 +254,17 @@ function DemandFilterBar({ filters, onChange, options, lockedField, lockedLabel 
         <option value="">All</option>
         {['X', 'Y', 'Z'].map(c => <option key={c} value={c}>{c}</option>)}
       </FSelect>
+
+      {personaRole === 'category_manager' && (
+        <FSelect label="Branch Adj %" value={severityBucket} onChange={onSeverityChange}>
+          <option value="all">All branches</option>
+          <option value="none">0% — No adjustment</option>
+          <option value="minor">1–10% — Minor</option>
+          <option value="mod">11–25% — Moderate</option>
+          <option value="large">26–50% — Large</option>
+          <option value="extreme">51%+ — Extreme</option>
+        </FSelect>
+      )}
     </div>
   );
 }
@@ -281,6 +295,7 @@ export default function DemandPlanning() {
   const [recalculating,     setRecalculating]     = useState(false);
   const [exceptionsData,    setExceptionsData]    = useState(null);
   const [exceptionsLoading, setExceptionsLoading] = useState(false);
+  const [branchAdjBucket,   setBranchAdjBucket]   = useState('all');
 
   const gridContainerRef = useRef();
   const [gridDims, setGridDims] = useState({ height: 500, width: 900 });
@@ -356,6 +371,26 @@ export default function DemandPlanning() {
 
   const markGridDirty = useCallback(() => { gridNeedsRefresh.current = true; }, []);
 
+  // Category Manager severity-bucket filter: compute branch adjustment % per row and filter
+  const displayRows = useMemo(() => {
+    if (persona?.role !== 'category_manager' || branchAdjBucket === 'all') return gridRows;
+    return gridRows.filter(r => {
+      const cells = Object.values(r.cells || {});
+      const sumBranch = cells.reduce((s, c) => s + (c.branchAdjustment || 0), 0);
+      const sumSys    = cells.reduce((s, c) => s + (c.systemForecast    || 0), 0);
+      if (sumSys === 0) return branchAdjBucket === 'none';
+      const pct = Math.abs(sumBranch / sumSys) * 100;
+      switch (branchAdjBucket) {
+        case 'none':    return pct === 0;
+        case 'minor':   return pct > 0   && pct <= 10;
+        case 'mod':     return pct > 10  && pct <= 25;
+        case 'large':   return pct > 25  && pct <= 50;
+        case 'extreme': return pct > 50;
+        default:        return true;
+      }
+    });
+  }, [gridRows, branchAdjBucket, persona?.role]);
+
   useEffect(() => {
     if (activeView !== 'grid') return;
     if (!gridNeedsRefresh.current) return;
@@ -411,24 +446,25 @@ export default function DemandPlanning() {
   }, [filters]);
 
   const handleCellEdit = useCallback(async ({ row, week, newValue }) => {
+    const { measureKey } = row;
     try {
       const res = await fetch('/api/demand-planning/grid/adjustment', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          sku:               row.sku,
-          locationId:        row.locationId,
-          weekNumber:        week,
-          year:              2025,
-          plannerAdjustment: newValue,
+          sku:        row.sku,
+          locationId: row.locationId,
+          weekNumber: week,
+          year:       2025,
+          measureKey,
+          value:      newValue,
         }),
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'Adjustment failed');
 
-      const { finalConsensus } = data.updated;
+      const { marketingAdjustment, branchAdjustment, categoryAdjustment, finalConsensus } = data.updated;
 
-      // Update the in-memory grid rows so the grid re-renders immediately
       setGridRows(prev => prev.map(r => {
         if (r.sku !== row.sku || r.locationId !== row.locationId) return r;
         return {
@@ -437,7 +473,9 @@ export default function DemandPlanning() {
             ...r.cells,
             [week]: {
               ...(r.cells[week] || {}),
-              plannerAdjustment: newValue,
+              marketingAdjustment,
+              branchAdjustment,
+              categoryAdjustment,
               finalConsensus,
             },
           },
@@ -481,6 +519,9 @@ export default function DemandPlanning() {
         options={filterOptions}
         lockedField={lockedFilter?.field}
         lockedLabel={lockedFilter?.label}
+        personaRole={persona?.role}
+        severityBucket={branchAdjBucket}
+        onSeverityChange={setBranchAdjBucket}
       />
 
 
@@ -500,7 +541,7 @@ export default function DemandPlanning() {
           </div>
         ) : (
           <DemandGrid
-            rows={gridRows}
+            rows={displayRows}
             weeks={gridWeeks}
             editableFrom={editableFrom}
             onCellEdit={handleCellEdit}
@@ -509,6 +550,7 @@ export default function DemandPlanning() {
             width={gridDims.width}
             showHistory={showHistory}
             onToggleHistory={() => setShowHistory(h => !h)}
+            personaRole={persona?.role ?? null}
           />
         )}
       </div>

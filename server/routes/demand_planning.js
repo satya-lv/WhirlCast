@@ -293,7 +293,8 @@ router.get('/grid', (req, res) => {
     const cells = db.prepare(`
       SELECT dwd.sku, dwd.location_id, dwd.week_number,
              dwd.actual_sales, dwd.system_forecast,
-             dwd.planner_adjustment, dwd.final_consensus,
+             dwd.planner_adjustment, dwd.branch_adjustment, dwd.category_adjustment,
+             dwd.final_consensus,
              l.name AS location_name, l.region,
              pm.category AS sku_family, pm.abc_class, pm.xyz_class
       FROM demand_weekly_data dwd
@@ -320,11 +321,13 @@ router.get('/grid', (req, res) => {
         });
       }
       rowMap.get(key).cells[c.week_number] = {
-        actualSales:       c.actual_sales,
-        systemForecast:    c.system_forecast,
-        plannerAdjustment: c.planner_adjustment,
-        finalConsensus:    c.final_consensus,
-        editable:          c.week_number >= EDITABLE_FROM_WEEK,
+        actualSales:         c.actual_sales,
+        systemForecast:      c.system_forecast,
+        marketingAdjustment: c.planner_adjustment,
+        branchAdjustment:    c.branch_adjustment,
+        categoryAdjustment:  c.category_adjustment,
+        finalConsensus:      c.final_consensus,
+        editable:            c.week_number >= EDITABLE_FROM_WEEK,
       };
     }
 
@@ -345,25 +348,42 @@ router.get('/grid', (req, res) => {
 });
 
 // ── PATCH /api/demand-planning/grid/adjustment ────────────────────────────
-// Update a single planner_adjustment cell. Weeks < 27 are locked historical.
-// final_consensus is a GENERATED column — SQLite recomputes it automatically.
+// Update a single adjustment cell and recompute final_consensus.
 //
-// Body: { sku, locationId, weekNumber, year?, plannerAdjustment }
+// New format:  { sku, locationId, weekNumber, year?, measureKey, value }
+//   measureKey: 'marketingAdjustment' | 'branchAdjustment' | 'categoryAdjustment'
+//
+// Legacy format (What-If apply — always writes Marketing Adjustment):
+//   { sku, locationId, weekNumber, year?, plannerAdjustment }
+
+const ADJUSTMENT_COLUMN_MAP = {
+  marketingAdjustment: 'planner_adjustment',
+  branchAdjustment:    'branch_adjustment',
+  categoryAdjustment:  'category_adjustment',
+};
 
 router.patch('/grid/adjustment', (req, res) => {
   try {
-    const { sku, locationId, weekNumber, plannerAdjustment } = req.body;
+    const { sku, locationId, weekNumber, measureKey, value, plannerAdjustment } = req.body;
     const year = parseInt(req.body.year) || DEMAND_YEAR;
 
-    if (!sku || locationId == null || weekNumber == null || plannerAdjustment == null) {
-      return res.status(400).json({
-        error: 'sku, locationId, weekNumber, plannerAdjustment are required',
-      });
+    let colName, adjValue;
+    if (measureKey && ADJUSTMENT_COLUMN_MAP[measureKey] !== undefined) {
+      colName  = ADJUSTMENT_COLUMN_MAP[measureKey];
+      adjValue = parseFloat(value);
+    } else if (plannerAdjustment !== undefined && plannerAdjustment !== null) {
+      colName  = 'planner_adjustment';
+      adjValue = parseFloat(plannerAdjustment);
+    } else {
+      return res.status(400).json({ error: 'measureKey+value or plannerAdjustment required' });
+    }
+
+    if (!sku || locationId == null || weekNumber == null || isNaN(adjValue)) {
+      return res.status(400).json({ error: 'sku, locationId, weekNumber, and a valid value are required' });
     }
 
     const wk    = parseInt(weekNumber);
     const locId = parseInt(locationId);
-    const adj   = parseFloat(plannerAdjustment);
 
     if (wk < EDITABLE_FROM_WEEK) {
       return res.status(400).json({
@@ -375,23 +395,32 @@ router.patch('/grid/adjustment', (req, res) => {
 
     const result = db.prepare(`
       UPDATE demand_weekly_data
-      SET planner_adjustment = ?
+      SET ${colName} = ?
       WHERE sku = ? AND location_id = ? AND week_number = ? AND year = ?
-    `).run(adj, sku, locId, wk, year);
+    `).run(adjValue, sku, locId, wk, year);
 
     if (result.changes === 0) {
       db.close();
       return res.status(404).json({ error: 'Row not found' });
     }
 
+    // Recompute and persist final_consensus (no longer a GENERATED column)
+    db.prepare(`
+      UPDATE demand_weekly_data
+      SET final_consensus = system_forecast + planner_adjustment + branch_adjustment + category_adjustment
+      WHERE sku = ? AND location_id = ? AND week_number = ? AND year = ?
+    `).run(sku, locId, wk, year);
+
     const updated = db.prepare(`
       SELECT sku,
-             location_id       AS locationId,
-             week_number       AS weekNumber,
+             location_id         AS locationId,
+             week_number         AS weekNumber,
              year,
-             system_forecast   AS systemForecast,
-             planner_adjustment AS plannerAdjustment,
-             final_consensus   AS finalConsensus
+             system_forecast     AS systemForecast,
+             planner_adjustment  AS marketingAdjustment,
+             branch_adjustment   AS branchAdjustment,
+             category_adjustment AS categoryAdjustment,
+             final_consensus     AS finalConsensus
       FROM demand_weekly_data
       WHERE sku = ? AND location_id = ? AND week_number = ? AND year = ?
     `).get(sku, locId, wk, year);

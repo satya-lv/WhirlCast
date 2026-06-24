@@ -28,7 +28,24 @@
       "Bash(curl -s 'http://localhost:5001/api/supply/constraints?view=demand_impact&scenarioId=10&weekStart=24&weekEnd=40&skuFamily=Air%20Conditioner')",
       "Bash(node -e \"let d=''; process.stdin.on\\('data',c=>d+=c\\); process.stdin.on\\('end',\\(\\)=>{const r=JSON.parse\\(d\\); console.log\\('count:', r.count\\); r.recommendations?.forEach\\(rec=>console.log\\(' -', rec.issue?.slice\\(0,75\\)\\)\\);}\\)\")",
       "Bash(BROWSER=none npm start)",
-      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000)"
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000)",
+      "Bash(node server/db/migrate_demand.js)",
+      "Bash(taskkill //F //PID 31240)",
+      "Bash(taskkill //F //PID 34712)",
+      "Bash(node db/migrate_demand.js)",
+      "Bash(echo \"Backend starting with PID $!\")",
+      "Bash(npm start *)",
+      "Bash(echo \"Frontend starting with PID $!\")",
+      "Bash(curl -s http://localhost:5001/api/health)",
+      "Bash(curl -s -o /dev/null -w \"Frontend HTTP status: %{http_code}\" http://localhost:3000)",
+      "Bash(curl -s -X PATCH http://localhost:5001/api/demand-planning/grid/adjustment -H 'Content-Type: application/json' -d '{\"sku\":\"REF_190L_DirectCool\",\"locationId\":1,\"weekNumber\":28,\"year\":2025,\"measureKey\":\"branchAdjustment\",\"value\":75}')",
+      "Bash(python -m json.tool)",
+      "Bash(curl -s -X PATCH http://localhost:5001/api/demand-planning/grid/adjustment -H \"Content-Type: application/json\" -d '{\"sku\":\"REF_190L_DirectCool\",\"locationId\":1,\"weekNumber\":28,\"year\":2025,\"measureKey\":\"branchAdjustment\",\"value\":75}')",
+      "Bash(curl -s -X PATCH http://localhost:5001/api/demand-planning/grid/adjustment -H 'Content-Type: application/json' -d '{\"sku\":\"REF_190L_DirectCool\",\"locationId\":1,\"weekNumber\":28,\"year\":2025,\"measureKey\":\"categoryAdjustment\",\"value\":20}')",
+      "Bash(curl -s -X PATCH http://localhost:5001/api/demand-planning/grid/adjustment -H 'Content-Type: application/json' -d '{\"sku\":\"REF_190L_DirectCool\",\"locationId\":1,\"weekNumber\":28,\"year\":2025,\"measureKey\":\"marketingAdjustment\",\"value\":10}')",
+      "Bash(curl -s -X PATCH http://localhost:5001/api/demand-planning/grid/adjustment -H 'Content-Type: application/json' -d '{\"sku\":\"REF_190L_DirectCool\",\"locationId\":1,\"weekNumber\":28,\"year\":2025,\"measureKey\":\"branchAdjustment\",\"value\":0}')",
+      "Bash(curl -s -X PATCH http://localhost:5001/api/demand-planning/grid/adjustment -H 'Content-Type: application/json' -d '{\"sku\":\"REF_190L_DirectCool\",\"locationId\":1,\"weekNumber\":28,\"year\":2025,\"measureKey\":\"categoryAdjustment\",\"value\":0}')",
+      "Bash(curl -s -X PATCH http://localhost:5001/api/demand-planning/grid/adjustment -H 'Content-Type: application/json' -d '{\"sku\":\"REF_190L_DirectCool\",\"locationId\":1,\"weekNumber\":28,\"year\":2025,\"measureKey\":\"marketingAdjustment\",\"value\":0}')"
     ]
   }
 }
