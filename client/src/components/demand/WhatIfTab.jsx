@@ -504,9 +504,9 @@ export default function WhatIfTab({ filterOptions, lockedFilter, onApplyComplete
         }
         const body = await res.json();
         // Verify the DB actually reflects what we sent — catches any silent mismatch
-        if (!body.success || body.updated?.plannerAdjustment !== newAdj) {
+        if (!body.success || body.updated?.marketingAdjustment !== newAdj) {
           throw new Error(
-            `Week ${w.weekNumber}: server confirmed plannerAdjustment=${body.updated?.plannerAdjustment}, expected ${newAdj}`
+            `Week ${w.weekNumber}: server confirmed marketingAdjustment=${body.updated?.marketingAdjustment}, expected ${newAdj}`
           );
         }
         written.push(before[i]);
