@@ -152,8 +152,8 @@ function seedDemand(force = false) {
 
   const insertRow = db.prepare(`
     INSERT INTO demand_weekly_data
-      (sku, location_id, week_number, year, actual_sales, system_forecast, planner_adjustment)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+      (sku, location_id, week_number, year, actual_sales, system_forecast, planner_adjustment, final_consensus)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   // allRows held in memory for exception computation below.
@@ -183,7 +183,7 @@ function seedDemand(force = false) {
 
           const plannerAdj = overrideMap[overrideKey(sku, locationId, wk)] || 0;
 
-          insertRow.run(sku, locationId, wk, YEAR, actual, forecast, plannerAdj);
+          insertRow.run(sku, locationId, wk, YEAR, actual, forecast, plannerAdj, forecast + plannerAdj);
           allRows.push({ sku, locationId, weekNumber: wk, actual, forecast, plannerAdj, price, seasonal });
         }
         locIdx++;

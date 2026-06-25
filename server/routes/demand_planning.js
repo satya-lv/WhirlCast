@@ -13,6 +13,8 @@
  *   PATCH /api/demand-planning/exceptions/:id/acknowledge
  *   POST  /api/demand-planning/whatif
  *   GET   /api/demand-planning/npi/predecessor-stats
+ *   POST  /api/demand-planning/model/recalculate
+ *   POST  /api/demand-planning/model/finalize
  */
 const express = require('express');
 const router  = express.Router();
@@ -112,6 +114,82 @@ function classifyPattern(weeklyTotals) {
   else                             patternType = 'Stable';
 
   return { patternType, h1h2Ratio, slopePctOfMean };
+}
+
+// ── Model forecasting helpers ──────────────────────────────────────────────
+
+const FORECAST_MODELS = [
+  'SARIMAX',
+  'Prophet',
+  'Exponential Smoothing',
+  'Moving Average',
+  "Croston's Method",
+  'Linear Regression',
+];
+const PROPHET_PHI = 0.90;  // damping factor (Gardner & McKenzie 1985)
+
+// OLS linear regression: returns { alpha, beta } or null if n < 2
+function computeOLSLinearFit(xs, ys) {
+  const n = xs.length;
+  if (n < 2) return null;
+  const xMean = xs.reduce((s, x) => s + x, 0) / n;
+  const yMean = ys.reduce((s, y) => s + y, 0) / n;
+  let num = 0, den = 0;
+  for (let i = 0; i < n; i++) {
+    num += (xs[i] - xMean) * (ys[i] - yMean);
+    den += (xs[i] - xMean) ** 2;
+  }
+  const beta  = den === 0 ? 0 : num / den;
+  const alpha = yMean - beta * xMean;
+  return { alpha, beta };
+}
+
+// Prophet-style forecast with damped trend (phi = PROPHET_PHI).
+// Decomposition: de-seasonalize historical actuals → OLS trend fit → re-seasonalize.
+// Seasonal factors S(w) derived from SARIMAX system_forecast as ratio-to-mean.
+// Returns { [weekNumber]: forecastValue } or null (fall back to SARIMAX if <3 hist weeks).
+function computeProphetForecast(weekData, phi) {
+  // Step 1: seasonal factors from system_forecast
+  const meanForecast = weekData.reduce((s, r) => s + r.systemForecast, 0) / weekData.length;
+  if (meanForecast === 0) return null;
+
+  const S = {};
+  for (const r of weekData) S[r.weekNumber] = r.systemForecast / meanForecast;
+
+  // Step 2: de-seasonalize historical actuals (weeks 1-23, non-zero)
+  const histRows = weekData.filter(r => r.weekNumber < 24 && r.actualSales > 0);
+  if (histRows.length < 3) return null;  // insufficient history
+
+  const xs = histRows.map(r => r.weekNumber);
+  const ys = histRows.map(r => {
+    const s = S[r.weekNumber] || 1;
+    return s > 0 ? r.actualSales / s : r.actualSales;
+  });
+
+  // Step 3: OLS on de-seasonalized actuals
+  const fit = computeOLSLinearFit(xs, ys);
+  if (!fit) return null;
+  const { alpha, beta } = fit;
+
+  // Level at end of history (week 23)
+  const L = alpha + beta * 23;
+
+  // Step 4: project with damped trend and re-seasonalize
+  const results = {};
+  for (const r of weekData) {
+    const t = r.weekNumber;
+    let trendDS;
+    if (t <= 23) {
+      trendDS = alpha + beta * t;
+    } else {
+      // Damped trend: accumulated slope = β × φ × (1 - φ^h) / (1 - φ)
+      const h = t - 23;
+      const accSlope = beta * phi * (1 - Math.pow(phi, h)) / (1 - phi);
+      trendDS = L + accSlope;
+    }
+    results[t] = Math.max(0, Math.round(trendDS * (S[t] || 1)));
+  }
+  return results;
 }
 
 // ── GET /api/demand-planning/filters ──────────────────────────────────────
@@ -835,6 +913,178 @@ router.get('/npi/predecessor-stats', (req, res) => {
       avgMonthlyUnits:  Math.round(row.avgMonthlyUnits),
       totalAnnualUnits: Math.round(row.totalAnnualUnits),
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/demand-planning/model/recalculate ────────────────────────────
+// Read-only preview: computes new forecast for current scope, returns comparison.
+// Does NOT write to the database.
+
+router.post('/model/recalculate', (req, res) => {
+  try {
+    const { modelName, filters = {} } = req.body;
+    if (!modelName || !FORECAST_MODELS.includes(modelName)) {
+      return res.status(400).json({ error: `Invalid modelName. Valid: ${FORECAST_MODELS.join(', ')}` });
+    }
+
+    const db = getDb();
+    const { where, params } = buildDemandWhere(filters);
+
+    const dbRows = db.prepare(`
+      SELECT dwd.sku, dwd.location_id, dwd.week_number,
+             dwd.actual_sales, dwd.system_forecast,
+             l.name AS location_name
+      FROM demand_weekly_data dwd
+      JOIN locations l ON dwd.location_id = l.location_id
+      JOIN product_master pm ON dwd.sku = pm.sku
+      WHERE ${where}
+      ORDER BY dwd.sku, dwd.location_id, dwd.week_number
+    `).all(...params);
+    db.close();
+
+    // Group by sku-location
+    const skuLocMap = new Map();
+    for (const r of dbRows) {
+      const key = `${r.sku}|${r.location_id}`;
+      if (!skuLocMap.has(key)) {
+        skuLocMap.set(key, {
+          sku: r.sku, locationId: r.location_id, locationName: r.location_name, weeks: [],
+        });
+      }
+      skuLocMap.get(key).weeks.push({
+        weekNumber: r.week_number, actualSales: r.actual_sales, systemForecast: r.system_forecast,
+      });
+    }
+
+    const isImplemented = modelName === 'Prophet';
+    const weekTotals    = {};
+    const rows          = [];
+    let fallbackCount   = 0;
+
+    for (const [, entry] of skuLocMap) {
+      let proposed = null;
+      if (modelName === 'Prophet') {
+        proposed = computeProphetForecast(entry.weeks, PROPHET_PHI);
+      }
+      const usedFallback = modelName === 'Prophet' && !proposed;
+      if (usedFallback) fallbackCount++;
+
+      const cells = {};
+      for (const w of entry.weeks) {
+        const cur      = w.systemForecast;
+        const prop     = proposed ? (proposed[w.weekNumber] ?? cur) : cur;
+        cells[w.weekNumber] = { current: cur, proposed: prop };
+
+        if (!weekTotals[w.weekNumber]) weekTotals[w.weekNumber] = { current: 0, proposed: 0 };
+        weekTotals[w.weekNumber].current  += cur;
+        weekTotals[w.weekNumber].proposed += prop;
+      }
+
+      rows.push({
+        sku: entry.sku, locationId: entry.locationId, locationName: entry.locationName,
+        usedFallback, cells,
+      });
+    }
+
+    const weeklySummary = Object.entries(weekTotals)
+      .map(([w, t]) => {
+        const wk   = parseInt(w);
+        const cur  = Math.round(t.current);
+        const prop = Math.round(t.proposed);
+        return {
+          week:    wk,
+          current: cur,
+          proposed: prop,
+          diff:    prop - cur,
+          diffPct: cur > 0 ? parseFloat(((prop - cur) / cur * 100).toFixed(1)) : 0,
+        };
+      })
+      .sort((a, b) => a.week - b.week);
+
+    const futureWeeks = weeklySummary.filter(w => w.week >= EDITABLE_FROM_WEEK);
+    const futCur  = futureWeeks.reduce((s, w) => s + w.current,  0);
+    const futProp = futureWeeks.reduce((s, w) => s + w.proposed, 0);
+
+    res.json({
+      modelName,
+      isImplemented,
+      fallbackCount,
+      summary: {
+        totalCurrentFuture:  futCur,
+        totalProposedFuture: futProp,
+        diffUnits: futProp - futCur,
+        diffPct:   futCur > 0 ? parseFloat(((futProp - futCur) / futCur * 100).toFixed(1)) : 0,
+      },
+      weeklySummary,
+      rows,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/demand-planning/model/finalize ────────────────────────────────
+// Deliberate commit: overwrites system_forecast + recomputes final_consensus.
+
+router.post('/model/finalize', (req, res) => {
+  try {
+    const { modelName, filters = {} } = req.body;
+    if (!modelName || !FORECAST_MODELS.includes(modelName)) {
+      return res.status(400).json({ error: 'Invalid modelName' });
+    }
+
+    const db = getDb();
+    const { where, params } = buildDemandWhere(filters);
+
+    const dbRows = db.prepare(`
+      SELECT dwd.sku, dwd.location_id, dwd.week_number,
+             dwd.actual_sales, dwd.system_forecast
+      FROM demand_weekly_data dwd
+      JOIN product_master pm ON dwd.sku = pm.sku
+      WHERE ${where}
+      ORDER BY dwd.sku, dwd.location_id, dwd.week_number
+    `).all(...params);
+
+    // Group by sku-location
+    const skuLocMap = new Map();
+    for (const r of dbRows) {
+      const key = `${r.sku}|${r.location_id}`;
+      if (!skuLocMap.has(key)) {
+        skuLocMap.set(key, { sku: r.sku, locationId: r.location_id, weeks: [] });
+      }
+      skuLocMap.get(key).weeks.push({
+        weekNumber: r.week_number, actualSales: r.actual_sales, systemForecast: r.system_forecast,
+      });
+    }
+
+    const stmt = db.prepare(`
+      UPDATE demand_weekly_data
+      SET system_forecast = ?,
+          final_consensus = ? + planner_adjustment + branch_adjustment + category_adjustment
+      WHERE sku = ? AND location_id = ? AND week_number = ? AND year = ?
+    `);
+
+    let updatedRows = 0;
+    const finalizeAll = db.transaction(() => {
+      for (const [, entry] of skuLocMap) {
+        let proposed = null;
+        if (modelName === 'Prophet') {
+          proposed = computeProphetForecast(entry.weeks, PROPHET_PHI);
+        }
+        for (const w of entry.weeks) {
+          const newSysFcst = proposed ? (proposed[w.weekNumber] ?? w.systemForecast) : w.systemForecast;
+          stmt.run(newSysFcst, newSysFcst, entry.sku, entry.locationId, w.weekNumber, DEMAND_YEAR);
+          updatedRows++;
+        }
+      }
+    });
+
+    finalizeAll();
+    db.close();
+
+    res.json({ success: true, modelName, updatedRows });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

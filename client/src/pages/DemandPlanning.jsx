@@ -86,6 +86,41 @@ async function fetchPatterns(filters) {
   return r.json();
 }
 
+const FORECAST_MODELS = [
+  'SARIMAX',
+  'Prophet',
+  'Exponential Smoothing',
+  'Moving Average',
+  "Croston's Method",
+  'Linear Regression',
+];
+
+async function fetchRecalculate(modelName, filters) {
+  const r = await fetch('/api/demand-planning/model/recalculate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ modelName, filters }),
+  });
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    throw new Error(e.error || `recalculate ${r.status}`);
+  }
+  return r.json();
+}
+
+async function fetchFinalize(modelName, filters) {
+  const r = await fetch('/api/demand-planning/model/finalize', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ modelName, filters }),
+  });
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    throw new Error(e.error || `finalize ${r.status}`);
+  }
+  return r.json();
+}
+
 // ── KPI bar ───────────────────────────────────────────────────────────────────
 
 const KPI_DEFS = [
@@ -269,6 +304,197 @@ function DemandFilterBar({
   );
 }
 
+// ── Model selection bar ───────────────────────────────────────────────────────
+
+function ModelBar({ selectedModel, onModelChange, onRecalculate, loading }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 12,
+      padding: '7px 16px',
+      background: '#F0F4FF',
+      borderBottom: '1px solid var(--border)',
+      flexShrink: 0,
+    }}>
+      <span style={{
+        fontSize: 10, fontWeight: 700, letterSpacing: '0.4px',
+        textTransform: 'uppercase', color: 'var(--text-3)', whiteSpace: 'nowrap',
+      }}>
+        Forecast Model
+      </span>
+      <select
+        value={selectedModel}
+        onChange={e => onModelChange(e.target.value)}
+        disabled={loading}
+        style={{
+          fontSize: 12, padding: '4px 8px', borderRadius: 6,
+          border: '1px solid var(--border)', background: 'white',
+          color: 'var(--text-1)', cursor: loading ? 'default' : 'pointer',
+        }}
+      >
+        {FORECAST_MODELS.map(m => (
+          <option key={m} value={m}>
+            {m}{m === 'SARIMAX' ? ' (current baseline)' : ''}
+          </option>
+        ))}
+      </select>
+      <button
+        onClick={onRecalculate}
+        disabled={loading}
+        style={{
+          padding: '4px 14px', fontSize: 11, borderRadius: 6,
+          cursor: loading ? 'default' : 'pointer',
+          background: loading ? '#CBD5E1' : '#1E40AF',
+          color: loading ? '#64748B' : 'white',
+          border: 'none', fontWeight: 600,
+        }}
+      >
+        {loading ? 'Calculating…' : 'Recalculate'}
+      </button>
+      <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+        Demand Planner only · preview only until Finalize
+      </span>
+    </div>
+  );
+}
+
+// ── Comparison panel ──────────────────────────────────────────────────────────
+
+function ComparisonPanel({ result, onFinalize, finalizing, onDismiss }) {
+  const { modelName, isImplemented, fallbackCount, summary, weeklySummary } = result;
+  const futureRows = weeklySummary.filter(w => w.week >= 24);
+  const diffColor  = summary.diffUnits > 0 ? '#16A34A' : summary.diffUnits < 0 ? '#DC2626' : '#64748B';
+
+  return (
+    <div style={{
+      background: 'var(--card)',
+      borderBottom: '2px solid #1E40AF',
+      flexShrink: 0,
+    }}>
+      {/* Header row */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '7px 16px 6px',
+        borderBottom: '1px solid var(--border)',
+      }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-1)' }}>
+          Comparison: System Forecast vs {modelName} (weeks 24–52)
+        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>Current:</span>
+          <span style={{ fontSize: 11, fontWeight: 600 }}>
+            {summary.totalCurrentFuture.toLocaleString('en-IN')}
+          </span>
+          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>→ {modelName}:</span>
+          <span style={{ fontSize: 11, fontWeight: 700, color: diffColor }}>
+            {summary.totalProposedFuture.toLocaleString('en-IN')}
+          </span>
+          <span style={{ fontSize: 11, fontWeight: 700, color: diffColor }}>
+            ({summary.diffUnits > 0 ? '+' : ''}{summary.diffUnits.toLocaleString('en-IN')} / {summary.diffPct > 0 ? '+' : ''}{summary.diffPct}%)
+          </span>
+          <button
+            onClick={onDismiss}
+            style={{
+              fontSize: 11, padding: '2px 8px', borderRadius: 4,
+              border: '1px solid var(--border)', background: 'var(--bg)',
+              color: 'var(--text-2)', cursor: 'pointer',
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+
+      {/* Non-implemented notice */}
+      {!isImplemented && (
+        <div style={{ padding: '5px 16px', background: '#FEF9C3', fontSize: 11, color: '#78350F' }}>
+          <strong>{modelName}</strong> is not yet differentiated — displaying SARIMAX baseline.
+          Finalize would write identical values back (no-op).
+        </div>
+      )}
+      {isImplemented && fallbackCount > 0 && (
+        <div style={{ padding: '5px 16px', background: '#EFF6FF', fontSize: 11, color: '#1D4ED8' }}>
+          {fallbackCount} SKU-location(s) had &lt;3 weeks of history and used SARIMAX as fallback.
+        </div>
+      )}
+
+      {/* Table + Finalize button side by side */}
+      <div style={{ display: 'flex', alignItems: 'stretch' }}>
+        <div style={{ flex: 1, overflowX: 'auto', maxHeight: 180, overflowY: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+            <thead>
+              <tr style={{ background: '#F8FAFC', position: 'sticky', top: 0, zIndex: 1 }}>
+                {['Week', 'Current', modelName, 'Δ Units', 'Δ %'].map(h => (
+                  <th key={h} style={{
+                    padding: '4px 12px', textAlign: h === 'Week' ? 'left' : 'right',
+                    fontWeight: 700, color: 'var(--text-3)', letterSpacing: '0.4px',
+                    fontSize: 10, textTransform: 'uppercase',
+                    borderBottom: '1px solid var(--border)',
+                  }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {futureRows.map(w => (
+                <tr key={w.week} style={{
+                  background: w.diff > 0 ? '#F0FDF4' : w.diff < 0 ? '#FFF7ED' : 'white',
+                }}>
+                  <td style={{ padding: '3px 12px', color: 'var(--text-2)', borderBottom: '1px solid rgba(0,0,0,0.04)' }}>
+                    W{w.week}
+                  </td>
+                  <td style={{ padding: '3px 12px', textAlign: 'right', borderBottom: '1px solid rgba(0,0,0,0.04)' }}>
+                    {w.current.toLocaleString('en-IN')}
+                  </td>
+                  <td style={{ padding: '3px 12px', textAlign: 'right', fontWeight: 600, borderBottom: '1px solid rgba(0,0,0,0.04)' }}>
+                    {w.proposed.toLocaleString('en-IN')}
+                  </td>
+                  <td style={{
+                    padding: '3px 12px', textAlign: 'right', borderBottom: '1px solid rgba(0,0,0,0.04)',
+                    color: w.diff > 0 ? '#16A34A' : w.diff < 0 ? '#DC2626' : 'var(--text-3)',
+                  }}>
+                    {w.diff > 0 ? '+' : ''}{w.diff.toLocaleString('en-IN')}
+                  </td>
+                  <td style={{
+                    padding: '3px 12px', textAlign: 'right', borderBottom: '1px solid rgba(0,0,0,0.04)',
+                    color: w.diffPct > 0 ? '#16A34A' : w.diffPct < 0 ? '#DC2626' : 'var(--text-3)',
+                  }}>
+                    {w.diffPct > 0 ? '+' : ''}{w.diffPct}%
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Finalize */}
+        <div style={{
+          padding: '12px 16px', flexShrink: 0,
+          display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end',
+          justifyContent: 'center', borderLeft: '1px solid var(--border)',
+        }}>
+          <button
+            onClick={onFinalize}
+            disabled={finalizing}
+            style={{
+              padding: '8px 22px', fontSize: 12, borderRadius: 6,
+              cursor: finalizing ? 'default' : 'pointer',
+              background: finalizing ? '#CBD5E1' : '#16A34A',
+              color: finalizing ? '#64748B' : 'white',
+              border: 'none', fontWeight: 700, whiteSpace: 'nowrap',
+            }}
+          >
+            {finalizing ? 'Finalizing…' : 'Finalize →'}
+          </button>
+          <span style={{
+            fontSize: 10, color: 'var(--text-3)', maxWidth: 160, textAlign: 'right',
+          }}>
+            Overwrites System Forecast for all rows in current scope
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function DemandPlanning() {
@@ -296,6 +522,10 @@ export default function DemandPlanning() {
   const [exceptionsData,    setExceptionsData]    = useState(null);
   const [exceptionsLoading, setExceptionsLoading] = useState(false);
   const [branchAdjBucket,   setBranchAdjBucket]   = useState('all');
+  const [selectedModel,    setSelectedModel]    = useState('SARIMAX');
+  const [compareResult,    setCompareResult]    = useState(null);
+  const [compareLoading,   setCompareLoading]   = useState(false);
+  const [finalizeLoading,  setFinalizeLoading]  = useState(false);
 
   const gridContainerRef = useRef();
   const [gridDims, setGridDims] = useState({ height: 500, width: 900 });
@@ -445,6 +675,43 @@ export default function DemandPlanning() {
     }
   }, [filters]);
 
+  // Clear comparison when filters change (scope has shifted)
+  useEffect(() => { setCompareResult(null); }, [filters]);
+
+  const handleModelRecalculate = useCallback(async () => {
+    setCompareLoading(true);
+    setCompareResult(null);
+    try {
+      const data = await fetchRecalculate(selectedModel, filters);
+      setCompareResult(data);
+    } catch (err) {
+      console.error('Model recalculate failed:', err.message);
+    } finally {
+      setCompareLoading(false);
+    }
+  }, [selectedModel, filters]);
+
+  const handleModelFinalize = useCallback(async () => {
+    if (!compareResult) return;
+    setFinalizeLoading(true);
+    try {
+      const data = await fetchFinalize(selectedModel, filters);
+      if (!data.success) throw new Error(data.error || 'Finalize failed');
+      setCompareResult(null);
+      setGridLoading(true);
+      const { rows, weeks, editableFrom: ef } = await fetchAllGridPages(filters, showHistory ? 1 : 24);
+      setGridRows(rows);
+      setGridWeeks(weeks);
+      setEditableFrom(ef);
+      refreshKPIs();
+    } catch (err) {
+      console.error('Model finalize failed:', err.message);
+    } finally {
+      setFinalizeLoading(false);
+      setGridLoading(false);
+    }
+  }, [compareResult, selectedModel, filters, showHistory, refreshKPIs]);
+
   const handleCellEdit = useCallback(async ({ row, week, newValue }) => {
     const { measureKey } = row;
     try {
@@ -524,6 +791,26 @@ export default function DemandPlanning() {
         onSeverityChange={setBranchAdjBucket}
       />
 
+
+      {/* Model selection bar — Demand Planner only, Grid tab only */}
+      {activeView === 'grid' && persona?.role === 'planner' && (
+        <ModelBar
+          selectedModel={selectedModel}
+          onModelChange={v => { setSelectedModel(v); setCompareResult(null); }}
+          onRecalculate={handleModelRecalculate}
+          loading={compareLoading}
+        />
+      )}
+
+      {/* Comparison panel — shown after Recalculate, before Finalize */}
+      {activeView === 'grid' && compareResult && (
+        <ComparisonPanel
+          result={compareResult}
+          onFinalize={handleModelFinalize}
+          finalizing={finalizeLoading}
+          onDismiss={() => setCompareResult(null)}
+        />
+      )}
 
       {/* Forecast Grid tab — always mounted; display:none preserves react-window scroll/expand state */}
       <div

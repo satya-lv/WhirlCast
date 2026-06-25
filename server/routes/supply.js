@@ -143,7 +143,7 @@ router.get('/grid', (req, res) => {
     const sql = `
       SELECT po.order_id, po.sku, po.location_id, po.plant_id, po.production_line_id,
         po.week_number, po.year, po.scenario_id,
-        COALESCE(dwd.final_consensus, po.forecast_demand) AS forecast_demand,
+        COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) AS forecast_demand,
         po.customer_orders, po.priority_demand,
         po.beginning_inventory, po.planned_production, po.firm_production_orders,
         po.purchase_orders, po.transfer_orders, po.ending_inventory,
@@ -233,11 +233,11 @@ router.get('/kpis', (req, res) => {
 
     const agg = db.prepare(`
       SELECT
-        SUM(COALESCE(dwd.final_consensus, po.forecast_demand))   AS totalDemand,
+        SUM(COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand))   AS totalDemand,
         SUM(po.planned_production)                               AS feasibleSupply,
-        SUM(MAX(0, COALESCE(dwd.final_consensus, po.forecast_demand) - po.planned_production))
+        SUM(MAX(0, COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) - po.planned_production))
                                                                  AS unconstrainedVsConstrainedGap,
-        SUM(MAX(0, COALESCE(dwd.final_consensus, po.forecast_demand) - po.beginning_inventory - po.planned_production))
+        SUM(MAX(0, COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) - po.beginning_inventory - po.planned_production))
                                                                  AS totalShortage,
         SUM(po.ending_inventory)                                 AS totalEndingInventory,
         SUM(po.capacity_required)                                AS totalCapRequired,
@@ -254,7 +254,7 @@ router.get('/kpis', (req, res) => {
 
     const revRisk = db.prepare(`
       SELECT SUM(
-        MAX(0, COALESCE(dwd.final_consensus, po.forecast_demand) - po.beginning_inventory - po.planned_production)
+        MAX(0, COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) - po.beginning_inventory - po.planned_production)
         * pm.price
       ) AS revenueAtRisk
       FROM planning_orders po
@@ -263,7 +263,7 @@ router.get('/kpis', (req, res) => {
       LEFT JOIN demand_weekly_data dwd
              ON dwd.sku=po.sku AND dwd.location_id=po.location_id AND dwd.week_number=po.week_number
       WHERE ${where}
-        AND (COALESCE(dwd.final_consensus, po.forecast_demand) - po.beginning_inventory - po.planned_production) > 0`).get(...params);
+        AND (COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) - po.beginning_inventory - po.planned_production) > 0`).get(...params);
 
     // Total manufacturing hours available = distinct (line × week) combos × that line's hrs/week.
     // capacity_available in planning_orders is in units (line_hrs/hpu), so we can't sum it directly.
@@ -351,8 +351,8 @@ router.get('/constraints', (req, res) => {
             SUM(po.capacity_required)
             - (pl.hours_per_shift * pl.shifts_per_day * pl.working_days_per_week * (? - ? + 1))
           ), 1) AS overload_hrs,
-          ROUND(SUM(MAX(0, COALESCE(dwd.final_consensus, po.forecast_demand) - po.beginning_inventory - po.planned_production)), 1) AS total_shortage,
-          ROUND(SUM(COALESCE(dwd.final_consensus, po.forecast_demand)), 1) AS total_demand,
+          ROUND(SUM(MAX(0, COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) - po.beginning_inventory - po.planned_production)), 1) AS total_shortage,
+          ROUND(SUM(COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand)), 1) AS total_demand,
           COUNT(DISTINCT po.week_number) AS weeks_with_data
         FROM planning_orders po
         JOIN plants p  ON po.plant_id = p.plant_id
@@ -410,19 +410,19 @@ router.get('/constraints', (req, res) => {
         SELECT po.sku, pm.category AS sku_family, pm.price,
           l.name AS location_name, l.region,
           po.week_number,
-          ROUND(MAX(0, COALESCE(dwd.final_consensus, po.forecast_demand) - po.beginning_inventory - po.planned_production), 1) AS shortage_qty,
-          ROUND(COALESCE(dwd.final_consensus, po.forecast_demand), 1) AS forecast_demand,
-          ROUND(COALESCE(dwd.final_consensus, po.forecast_demand) * 0.62, 1) AS priority_demand,
-          ROUND(COALESCE(dwd.final_consensus, po.forecast_demand) * 0.82, 1) AS customer_orders,
-          ROUND(MAX(0, COALESCE(dwd.final_consensus, po.forecast_demand) - po.beginning_inventory - po.planned_production) * pm.price, 0) AS revenue_at_risk,
+          ROUND(MAX(0, COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) - po.beginning_inventory - po.planned_production), 1) AS shortage_qty,
+          ROUND(COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand), 1) AS forecast_demand,
+          ROUND(COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) * 0.62, 1) AS priority_demand,
+          ROUND(COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) * 0.82, 1) AS customer_orders,
+          ROUND(MAX(0, COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) - po.beginning_inventory - po.planned_production) * pm.price, 0) AS revenue_at_risk,
           -- Estimated tier impact: Tier 3 absorbs shortage first, then Tier 2, then Tier 1
           ROUND(MIN(
-            MAX(0, COALESCE(dwd.final_consensus, po.forecast_demand) - po.beginning_inventory - po.planned_production),
-            MAX(0, COALESCE(dwd.final_consensus, po.forecast_demand) * 0.82 - COALESCE(dwd.final_consensus, po.forecast_demand) * 0.62)
+            MAX(0, COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) - po.beginning_inventory - po.planned_production),
+            MAX(0, COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) * 0.82 - COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) * 0.62)
           ), 1) AS tier3_impact_units,
           ROUND(MAX(0,
-            MAX(0, COALESCE(dwd.final_consensus, po.forecast_demand) - po.beginning_inventory - po.planned_production)
-            - MAX(0, COALESCE(dwd.final_consensus, po.forecast_demand) * 0.82 - COALESCE(dwd.final_consensus, po.forecast_demand) * 0.62)
+            MAX(0, COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) - po.beginning_inventory - po.planned_production)
+            - MAX(0, COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) * 0.82 - COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) * 0.62)
           ), 1) AS tier12_impact_units
         FROM planning_orders po
         JOIN product_master pm ON po.sku = pm.sku
@@ -432,7 +432,7 @@ router.get('/constraints', (req, res) => {
         WHERE po.scenario_id=? AND po.year=2026
           AND po.week_number BETWEEN ? AND ?
           ${xWhere}
-          AND (COALESCE(dwd.final_consensus, po.forecast_demand) - po.beginning_inventory - po.planned_production) > 0
+          AND (COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) - po.beginning_inventory - po.planned_production) > 0
         ORDER BY revenue_at_risk DESC
         LIMIT 50`
       ).all(scenarioId, start, end, ...xParams);
@@ -441,8 +441,8 @@ router.get('/constraints', (req, res) => {
       const summary = db.prepare(`
         SELECT
           COUNT(*) AS impacted_rows,
-          SUM(MAX(0, COALESCE(dwd.final_consensus, po.forecast_demand) - po.beginning_inventory - po.planned_production) * pm.price) AS total_revenue_at_risk,
-          SUM(MAX(0, COALESCE(dwd.final_consensus, po.forecast_demand) - po.beginning_inventory - po.planned_production)) AS total_shortage_units,
+          SUM(MAX(0, COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) - po.beginning_inventory - po.planned_production) * pm.price) AS total_revenue_at_risk,
+          SUM(MAX(0, COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) - po.beginning_inventory - po.planned_production)) AS total_shortage_units,
           COUNT(DISTINCT po.sku) AS impacted_skus,
           COUNT(DISTINCT po.location_id) AS impacted_locations
         FROM planning_orders po
@@ -452,7 +452,7 @@ router.get('/constraints', (req, res) => {
         WHERE po.scenario_id=? AND po.year=2026
           AND po.week_number BETWEEN ? AND ?
           ${xWhere}
-          AND (COALESCE(dwd.final_consensus, po.forecast_demand) - po.beginning_inventory - po.planned_production) > 0`
+          AND (COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) - po.beginning_inventory - po.planned_production) > 0`
       ).get(scenarioId, start, end, ...xParams);
 
       db.close();
@@ -818,8 +818,8 @@ router.get('/recommendations', (req, res) => {
         p.name AS plant_name, pl.name AS line_name, pl.line_category,
         (pl.hours_per_shift * pl.shifts_per_day * pl.working_days_per_week) AS line_cap_hrs,
         ROUND(SUM(po.capacity_required), 1) AS total_req_hrs,
-        ROUND(SUM(MAX(0, COALESCE(dwd.final_consensus, po.forecast_demand) - po.beginning_inventory - po.planned_production)), 1) AS total_shortage,
-        ROUND(SUM(COALESCE(dwd.final_consensus, po.forecast_demand)), 1) AS total_demand,
+        ROUND(SUM(MAX(0, COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) - po.beginning_inventory - po.planned_production)), 1) AS total_shortage,
+        ROUND(SUM(COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand)), 1) AS total_demand,
         ROUND(SUM(po.planned_production), 1) AS total_prod
       FROM planning_orders po
       JOIN plants p  ON po.plant_id=p.plant_id
@@ -929,11 +929,11 @@ router.get('/recommendations', (req, res) => {
     // ── C. High-value inventory shortages (pull-ahead opportunities) ──────
     const invIssues = db.prepare(`
       SELECT po.sku, po.week_number, po.location_id,
-        MAX(0, COALESCE(dwd.final_consensus, po.forecast_demand) - po.beginning_inventory - po.planned_production) AS shortage_qty,
-        COALESCE(dwd.final_consensus, po.forecast_demand) AS forecast_demand,
+        MAX(0, COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) - po.beginning_inventory - po.planned_production) AS shortage_qty,
+        COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) AS forecast_demand,
         po.planned_production, po.beginning_inventory,
         l.name AS location_name, pm.price,
-        (MAX(0, COALESCE(dwd.final_consensus, po.forecast_demand) - po.beginning_inventory - po.planned_production) * pm.price) AS revenue_at_risk
+        (MAX(0, COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) - po.beginning_inventory - po.planned_production) * pm.price) AS revenue_at_risk
       FROM planning_orders po
       JOIN product_master pm ON po.sku=pm.sku
       JOIN locations l ON po.location_id=l.location_id
@@ -941,7 +941,7 @@ router.get('/recommendations', (req, res) => {
              ON dwd.sku=po.sku AND dwd.location_id=po.location_id AND dwd.week_number=po.week_number
       WHERE po.scenario_id=? AND po.year=2026 AND po.week_number BETWEEN ? AND ?
         ${rWhere}
-        AND (COALESCE(dwd.final_consensus, po.forecast_demand) - po.beginning_inventory - po.planned_production) > 10
+        AND (COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) - po.beginning_inventory - po.planned_production) > 10
       ORDER BY revenue_at_risk DESC
       LIMIT 5`
     ).all(scenarioId, start, end, ...rParams);
@@ -1011,12 +1011,12 @@ router.get('/scenarios', (req, res) => {
 
     const scenarios = db.prepare(`
       SELECT sc.scenario_id, sc.name, sc.description, sc.action_type, sc.status, sc.created_at,
-        ROUND(SUM(COALESCE(dwd.final_consensus, po.forecast_demand)), 0) AS total_demand,
+        ROUND(SUM(COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand)), 0) AS total_demand,
         ROUND(SUM(po.planned_production), 0) AS total_supply,
-        ROUND(SUM(MAX(0, COALESCE(dwd.final_consensus, po.forecast_demand) - po.beginning_inventory - po.planned_production)), 0) AS total_shortage,
-        ROUND((1 - SUM(MAX(0, COALESCE(dwd.final_consensus, po.forecast_demand) - po.beginning_inventory - po.planned_production))
-               /NULLIF(SUM(COALESCE(dwd.final_consensus, po.forecast_demand)),0))*100, 1) AS service_level_pct,
-        ROUND(SUM(MAX(0, COALESCE(dwd.final_consensus, po.forecast_demand) - po.beginning_inventory - po.planned_production) * pm.price), 0) AS revenue_at_risk,
+        ROUND(SUM(MAX(0, COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) - po.beginning_inventory - po.planned_production)), 0) AS total_shortage,
+        ROUND((1 - SUM(MAX(0, COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) - po.beginning_inventory - po.planned_production))
+               /NULLIF(SUM(COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand)),0))*100, 1) AS service_level_pct,
+        ROUND(SUM(MAX(0, COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) - po.beginning_inventory - po.planned_production) * pm.price), 0) AS revenue_at_risk,
         ROUND(SUM(po.capacity_required)*100.0/NULLIF(
           (SELECT SUM(pl2.hours_per_shift * pl2.shifts_per_day * pl2.working_days_per_week)
            FROM (SELECT DISTINCT po2.production_line_id, po2.week_number
@@ -1105,15 +1105,15 @@ router.get('/scenarios/compare', (req, res) => {
     const placeholders = rawIds.map(() => '?').join(',');
     const rows = db.prepare(`
       SELECT sc.scenario_id, sc.name, sc.action_type, sc.status,
-        ROUND(SUM(COALESCE(dwd.final_consensus, po.forecast_demand)), 0) AS total_demand,
+        ROUND(SUM(COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand)), 0) AS total_demand,
         ROUND(SUM(po.planned_production), 0) AS total_supply,
-        ROUND(SUM(MAX(0, COALESCE(dwd.final_consensus, po.forecast_demand) - po.planned_production)), 0) AS supply_gap,
-        ROUND(SUM(MAX(0, COALESCE(dwd.final_consensus, po.forecast_demand) - po.beginning_inventory - po.planned_production)), 0) AS total_shortage,
-        ROUND((1 - SUM(MAX(0, COALESCE(dwd.final_consensus, po.forecast_demand) - po.beginning_inventory - po.planned_production))
-               /NULLIF(SUM(COALESCE(dwd.final_consensus, po.forecast_demand)),0))*100, 1) AS service_level_pct,
-        ROUND(SUM(MAX(0, COALESCE(dwd.final_consensus, po.forecast_demand) - po.beginning_inventory - po.planned_production) * pm.price), 0) AS revenue_at_risk,
+        ROUND(SUM(MAX(0, COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) - po.planned_production)), 0) AS supply_gap,
+        ROUND(SUM(MAX(0, COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) - po.beginning_inventory - po.planned_production)), 0) AS total_shortage,
+        ROUND((1 - SUM(MAX(0, COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) - po.beginning_inventory - po.planned_production))
+               /NULLIF(SUM(COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand)),0))*100, 1) AS service_level_pct,
+        ROUND(SUM(MAX(0, COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand) - po.beginning_inventory - po.planned_production) * pm.price), 0) AS revenue_at_risk,
         ROUND(SUM(po.ending_inventory), 0) AS total_ending_inventory,
-        ROUND(SUM(po.ending_inventory)*7.0/NULLIF(SUM(COALESCE(dwd.final_consensus, po.forecast_demand)),0), 1) AS inventory_days,
+        ROUND(SUM(po.ending_inventory)*7.0/NULLIF(SUM(COALESCE(NULLIF(dwd.final_consensus, 0), po.forecast_demand)),0), 1) AS inventory_days,
         ROUND(SUM(po.capacity_required)*100.0/NULLIF(
           (SELECT SUM(pl2.hours_per_shift * pl2.shifts_per_day * pl2.working_days_per_week)
            FROM (SELECT DISTINCT po2.production_line_id, po2.week_number

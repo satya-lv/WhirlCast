@@ -173,7 +173,7 @@ function getCellHighlight(measureKey, value, week, editableFrom) {
 }
 
 function isEditableForPersona(measureKey, personaRole) {
-  if (!personaRole || personaRole === 'demand_planner') return true;
+  if (!personaRole || personaRole === 'planner') return true;
   if (personaRole === 'branch_manager')   return measureKey === 'branchAdjustment';
   if (personaRole === 'category_manager') return measureKey === 'categoryAdjustment';
   return true;
