@@ -545,7 +545,7 @@ export default function DemandPlanning() {
     return () => ro.disconnect();
   }, []);
 
-  useEffect(() => { setActiveView('grid'); }, []);
+  useEffect(() => { setActiveView('grid'); }, [setActiveView]);
 
   // Fetch filter options on mount
   useEffect(() => {

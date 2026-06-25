@@ -14,8 +14,8 @@ import { useNavigate } from 'react-router-dom';
 import { usePersona, getLockedFilter } from '../context/PersonaContext';
 import {
   Layers, RefreshCw, AlertTriangle, ChevronDown, ChevronRight, Zap,
-  BarChart2, GitBranch, Activity,
-  Sliders, Plus, Trophy, ArrowRight, Trash2, CheckCircle, FlaskConical,
+  GitBranch, Activity,
+  Plus, Trophy, ArrowRight, Trash2, CheckCircle,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer,
@@ -732,7 +732,7 @@ export default function SupplyPlanning() {
   const [constraintsKey,  setConstraintsKey]  = useState(0);
   const [actionCtx,       setActionCtx]       = useState(null);
 
-  useEffect(() => { setActiveView('grid'); }, []);
+  useEffect(() => { setActiveView('grid'); }, [setActiveView]);
 
   const gridContainerRef = useRef();
   const [gridDims, setGridDims] = useState({ height: 500, width: 900 });
@@ -874,7 +874,7 @@ export default function SupplyPlanning() {
   const handleSwitchScenario = useCallback((scenarioId) => {
     setFilters(f => ({ ...f, scenarioId }));
     setActiveView('grid');
-  }, []);
+  }, [setActiveView]);
 
   // Compute SKU-location status counts from raw grid rows (no extra fetch needed)
   const statusCounts = useMemo(() => {
@@ -922,7 +922,7 @@ export default function SupplyPlanning() {
         if (baseline) setFilters(f => ({ ...f, scenarioId: baseline.scenario_id }));
       })
       .catch(err => console.error('[RESET] filters fetch failed:', err));
-  }, []);
+  }, [setActiveView]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 40px)', overflow: 'hidden' }}>

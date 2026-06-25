@@ -27,7 +27,7 @@ export default function AdminConsole() {
   const { persona, activeView, setActiveView } = usePersona();
 
   const [localTab, setLocalTab] = useState('products');
-  useEffect(() => { setActiveView('products'); }, []);
+  useEffect(() => { setActiveView('products'); }, [setActiveView]);
   const activeTab    = persona ? activeView    : localTab;
   const setActiveTab = persona ? setActiveView : setLocalTab;
   const [products, setProducts] = useState([]);
