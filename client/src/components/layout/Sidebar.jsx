@@ -68,6 +68,7 @@ const MODULE_TABS = {
     { id: 'whatif',     label: 'What-If',          icon: FlaskConical  },
     { id: 'exceptions', label: 'Exceptions',       icon: AlertTriangle },
     { id: 'npi',        label: 'NPI Forecasting',  icon: Plus          },
+    { id: 'sensing',    label: 'Demand Sensing',   icon: Zap           },
   ],
   supply: [
     { id: 'grid',            label: 'Planning Grid',   icon: Layers       },

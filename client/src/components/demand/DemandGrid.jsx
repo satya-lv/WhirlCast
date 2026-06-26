@@ -136,9 +136,9 @@ function buildFlatRows(tree, expandedSkus, expandedLocs) {
 // ── Week label helper ─────────────────────────────────────────────────────────
 
 function toRelWeekShort(w) {
-  if (w < 24)   return `W${w}`;
+  if (w < 24)   return `M${w}`;
   if (w === 24) return 'Now';
-  return `+${w - 24}w`;
+  return `+${w - 24}M`;
 }
 
 // ── Value helpers ─────────────────────────────────────────────────────────────
@@ -479,7 +479,7 @@ export default function DemandGrid({
         fontSize: 11, color: 'var(--text-3)', flexShrink: 0,
         height: TOOLBAR_H, boxSizing: 'border-box',
       }}>
-        <span>{flatRows.length} rows visible · {weeks.length} weeks · {rows.length} SKU-locations</span>
+        <span>{flatRows.length} rows visible · {weeks.length} months · {rows.length} SKU-locations</span>
         <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
           {onToggleHistory && (
             <button

@@ -2,13 +2,13 @@
  * PatternsTab — Demand Planning Patterns tab content.
  *
  * Three separate sections per spec Section 5.2:
- * 1. Pattern Type Distribution bar chart  (Seasonal/Trend/Stable/Random)
+ * 1. Pattern Type Distribution bar chart  (Seasonal/Trend/Intermittent/Random)
  * 2. Volume × Variability scatter          (10 points, one per SKU)
  * 3. SKU-Location detail table             (80 rows, sortable)
  *
  * IMPORTANT — two distinct classification systems on this tab:
  * - ABC/XYZ class: volume/variability classification, per-SKU, stored on product_master
- * - Pattern Type: Seasonal/Trend/Stable/Random, a separate demand-shape classification
+ * - Pattern Type: Seasonal/Trend/Intermittent/Random, a separate demand-shape classification
  * Labels are kept explicit to avoid confusion between these two systems.
  *
  * Uses Recharts (already the app's charting library — BarChart, ScatterChart).
@@ -26,7 +26,7 @@ const PATTERN_COLORS = {
   Seasonal: '#2563EB',
   Trend:    '#D97706',
   Random:   '#DC2626',
-  Stable:   '#16A34A',
+  Intermittent: '#16A34A',
 };
 
 const ABC_FILL  = { A: '#16A34A', B: '#D97706', C: '#6B7280' };
@@ -34,7 +34,7 @@ const XYZ_BG   = { X: '#EFF6FF', Y: '#FFFBEB', Z: '#FFF1F2' };
 const XYZ_FG   = { X: '#1D4ED8', Y: '#B45309', Z: '#B91C1C' };
 
 // Fixed bar order so zero bars still appear honestly
-const BAR_ORDER = ['Seasonal', 'Trend', 'Random', 'Stable'];
+const BAR_ORDER = ['Seasonal', 'Trend', 'Random', 'Intermittent'];
 
 // ── Shared card wrapper ───────────────────────────────────────────────────────
 
@@ -153,7 +153,7 @@ const TABLE_COLS = [
   { key: 'patternType',  sortKey: 'patternType',   label: 'Pattern Type',  special: 'pattern' },
   { key: 'cov',          sortKey: 'cov',           label: 'CoV',           fmt: v => v.toFixed(3), align: 'right' },
   { key: 'annualVolume', sortKey: 'annualVolume',  label: 'Annual Volume', fmt: v => v.toLocaleString('en-IN'), align: 'right' },
-  { key: 'weeklyAvg',    sortKey: 'weeklyAvg',     label: 'Weekly Avg',    fmt: v => v.toFixed(0), align: 'right' },
+  { key: 'weeklyAvg',    sortKey: 'weeklyAvg',     label: 'Monthly Avg',   fmt: v => v.toFixed(0), align: 'right' },
 ];
 
 // ── PatternsTab ───────────────────────────────────────────────────────────────
@@ -228,7 +228,7 @@ export default function PatternsTab({ data, loading, onRecalculate, recalculatin
         {/* 1. Pattern Type Distribution */}
         <SectionCard
           title="Pattern Type Distribution"
-          note="Seasonal/Trend/Random/Stable — a separate classification from ABC/XYZ. Computed from national weekly demand totals."
+          note="Seasonal/Trend/Random/Intermittent — a separate classification from ABC/XYZ. Computed from national weekly demand totals."
         >
           <ResponsiveContainer width="100%" height={210}>
             <BarChart data={barData} margin={{ top: 4, right: 4, bottom: 0, left: -10 }}>

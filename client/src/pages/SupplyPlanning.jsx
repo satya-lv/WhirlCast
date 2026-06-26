@@ -10,6 +10,7 @@
 import React, {
   useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo,
 } from 'react';
+import * as XLSX from 'xlsx';
 import { useNavigate } from 'react-router-dom';
 import { usePersona, getLockedFilter } from '../context/PersonaContext';
 import {
@@ -29,12 +30,46 @@ import { useToast } from '../context/ToastContext';
 // fully dynamic; for now this is the single frontend point of truth).
 const CURRENT_WEEK_BOUNDARY = 24;
 
+// ── Grid export helpers ───────────────────────────────────────────────────────
+
+function buildSupplyExportData(rows, weeks) {
+  const weekLabels = weeks.map(w => w < 24 ? `M${w}` : w === 24 ? 'Now' : `+${w - 24}M`);
+  const headers = ['SKU', 'Location', 'Plant', 'Line', ...weekLabels];
+  const data = rows.map(r => [
+    r.sku,
+    r.locationName || `Loc${r.locationId}`,
+    r.plantName    || `Plant${r.plantId}`,
+    r.lineName     || `Line${r.productionLineId}`,
+    ...weeks.map(w => r.cells?.[w]?.forecastDemand ?? 0),
+  ]);
+  return { headers, data };
+}
+
+function downloadSupplyCSV(rows, weeks) {
+  const { headers, data } = buildSupplyExportData(rows, weeks);
+  const lines = [headers, ...data].map(row =>
+    row.map(v => typeof v === 'string' ? `"${v.replace(/"/g, '""')}"` : v).join(',')
+  );
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'supply_plan.csv'; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadSupplyXLSX(rows, weeks) {
+  const { headers, data } = buildSupplyExportData(rows, weeks);
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Supply Plan');
+  XLSX.writeFile(wb, 'supply_plan.xlsx');
+}
+
 // ── Week label helper ─────────────────────────────────────────────────────────
 
 function toRelWeek(w) {
-  if (w < 24)   return `W${w}`;
-  if (w === 24) return 'Current Week';
-  return `Week +${w - 24}`;
+  if (w < 24)   return `M${w}`;
+  if (w === 24) return 'Current Month';
+  return `M+${w - 24}`;
 }
 
 // ── Fetch helpers ──────────────────────────────────────────────────────────────
@@ -377,7 +412,7 @@ function ActionsPanel({ filterOptions, actionsMeta, metaError, filters, onAction
   const sections = [
     {
       id: 'increase', label: 'Increase Production', icon: '↑',
-      desc: 'Boost planned production units in the selected week.',
+      desc: 'Boost planned production units in the selected month.',
       body: (
         <>
           <PField label="Delta Qty">
@@ -393,7 +428,7 @@ function ActionsPanel({ filterOptions, actionsMeta, metaError, filters, onAction
     },
     {
       id: 'decrease', label: 'Decrease Production', icon: '↓',
-      desc: 'Reduce planned production units in the selected week.',
+      desc: 'Reduce planned production units in the selected month.',
       body: (
         <>
           <PField label="Delta Qty">
@@ -409,14 +444,14 @@ function ActionsPanel({ filterOptions, actionsMeta, metaError, filters, onAction
     },
     {
       id: 'pull_ahead', label: 'Pull Ahead', icon: '⇐',
-      desc: 'Move production from a later week into an earlier week.',
+      desc: 'Move production from a later month into an earlier month.',
       body: (
         <>
-          <PField label="From Week">
+          <PField label="From Month">
             <input type="number" min={1} max={52} value={pullFrom}
               onChange={e => setPullFrom(parseInt(e.target.value) || 1)} style={s.fieldInput} />
           </PField>
-          <PField label="To Week">
+          <PField label="To Month">
             <input type="number" min={1} max={52} value={pullTo}
               onChange={e => setPullTo(parseInt(e.target.value) || 1)} style={s.fieldInput} />
           </PField>
@@ -433,14 +468,14 @@ function ActionsPanel({ filterOptions, actionsMeta, metaError, filters, onAction
     },
     {
       id: 'push_out', label: 'Push Out', icon: '⇒',
-      desc: 'Defer production from an earlier week to a later week.',
+      desc: 'Defer production from an earlier month to a later month.',
       body: (
         <>
-          <PField label="From Week">
+          <PField label="From Month">
             <input type="number" min={1} max={52} value={pushFrom}
               onChange={e => setPushFrom(parseInt(e.target.value) || 1)} style={s.fieldInput} />
           </PField>
-          <PField label="To Week">
+          <PField label="To Month">
             <input type="number" min={1} max={52} value={pushTo}
               onChange={e => setPushTo(parseInt(e.target.value) || 1)} style={s.fieldInput} />
           </PField>
@@ -457,7 +492,7 @@ function ActionsPanel({ filterOptions, actionsMeta, metaError, filters, onAction
     },
     {
       id: 'change_plant', label: 'Change Plant', icon: '⇌',
-      desc: 'Reassign production for this SKU/week to a different plant.',
+      desc: 'Reassign production for this SKU/month to a different plant.',
       body: (
         <>
           <PField label="New Plant">
@@ -476,7 +511,7 @@ function ActionsPanel({ filterOptions, actionsMeta, metaError, filters, onAction
     },
     {
       id: 'overtime', label: 'Add Overtime', icon: '+⏱',
-      desc: 'Add extra production hours to a line this week (e.g. Saturday shift = 8 hrs).',
+      desc: 'Add extra production hours to a line this month (e.g. Saturday shift = 8 hrs).',
       body: (
         <>
           <PField label="Plant">
@@ -548,7 +583,7 @@ function ActionsPanel({ filterOptions, actionsMeta, metaError, filters, onAction
             <input type="number" min={1} value={expQty}
               onChange={e => setExpQty(parseInt(e.target.value) || 0)} style={s.fieldInput} />
           </PField>
-          <PField label="Due Week">
+          <PField label="Due Month">
             <input type="number" min={1} max={52} value={expWeekDue}
               onChange={e => setExpWeekDue(parseInt(e.target.value) || 1)} style={s.fieldInput} />
           </PField>
@@ -618,7 +653,7 @@ function ActionsPanel({ filterOptions, actionsMeta, metaError, filters, onAction
               ))}
             </select>
           </PField>
-          <PField label="Week">
+          <PField label="Month">
             <input type="number" min={1} max={52} value={ctx.weekNumber}
               onChange={e => setC('weekNumber', e.target.value)} style={s.fieldInput} />
           </PField>
@@ -735,6 +770,7 @@ export default function SupplyPlanning() {
   useEffect(() => { setActiveView('grid'); }, [setActiveView]);
 
   const gridContainerRef = useRef();
+  const supplyUploadRef  = useRef(null);
   const [gridDims, setGridDims] = useState({ height: 500, width: 900 });
 
   useLayoutEffect(() => {
@@ -983,6 +1019,35 @@ export default function SupplyPlanning() {
               Error loading data: {error}
             </div>
           )}
+          {/* Download / Upload toolbar */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 6, padding: '4px 12px',
+            borderBottom: '1px solid var(--border)', background: 'var(--card)', flexShrink: 0,
+            justifyContent: 'flex-end',
+          }}>
+            <button
+              onClick={() => downloadSupplyXLSX(rows, weeks)}
+              disabled={loading || rows.length === 0}
+              style={{ fontSize: 11, padding: '3px 10px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text-1)', cursor: 'pointer' }}
+            >
+              ↓ Excel
+            </button>
+            <button
+              onClick={() => downloadSupplyCSV(rows, weeks)}
+              disabled={loading || rows.length === 0}
+              style={{ fontSize: 11, padding: '3px 10px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text-1)', cursor: 'pointer' }}
+            >
+              ↓ CSV
+            </button>
+            <button
+              onClick={() => supplyUploadRef.current?.click()}
+              style={{ fontSize: 11, padding: '3px 10px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text-1)', cursor: 'pointer' }}
+            >
+              ↑ Upload
+            </button>
+            <input ref={supplyUploadRef} type="file" accept=".xlsx,.csv,.xls" style={{ display: 'none' }} onChange={() => {}} />
+          </div>
+
           <div style={{ flex: 1, minHeight: 0, display: 'flex', overflow: 'hidden' }}>
             <div ref={gridContainerRef} style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
               <PlanningGrid
@@ -1093,13 +1158,13 @@ function CapacityView({ rows = [], weekRange }) {
   return (
     <div>
       <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 12 }}>
-        Production line capacity vs. demand over W{weekRange?.start}–W{weekRange?.end}. Overloaded lines shown in red.
+        Production line capacity vs. demand over M{weekRange?.start}–M{weekRange?.end}. Overloaded lines shown in red.
       </div>
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
             <tr style={{ background: 'var(--bg)' }}>
-              {['Plant', 'Line', 'Category', 'Hrs/Wk (cap)', 'Hrs Required', 'Utilization', 'Overload Hrs', 'Shortage Units', 'Status'].map(h => (
+              {['Plant', 'Line', 'Category', 'Hrs/Mo (cap)', 'Hrs Required', 'Utilization', 'Overload Hrs', 'Shortage Units', 'Status'].map(h => (
                 <th key={h} style={{ padding: '6px 10px', textAlign: 'left', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.4px', color: 'var(--text-3)', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>{h}</th>
               ))}
             </tr>
@@ -1147,7 +1212,7 @@ function MaterialView({ rows = [], weekRange }) {
   return (
     <div>
       <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 12 }}>
-        Component material coverage for W{weekRange?.start}–W{weekRange?.end}. Components below 14 days are flagged.
+        Component material coverage for M{weekRange?.start}–M{weekRange?.end}. Components below 14 days are flagged.
       </div>
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
@@ -1225,7 +1290,7 @@ function DemandImpactView({ rows = [], summary }) {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
             <tr style={{ background: 'var(--bg)' }}>
-              {['SKU', 'Location', 'Wk', 'Forecast', 'Cust Orders', 'Shortage', 'Revenue at Risk', 'Tier-3 Impact', 'Tier-1/2 Impact'].map(h => (
+              {['SKU', 'Location', 'Mo', 'Forecast', 'Cust Orders', 'Shortage', 'Revenue at Risk', 'Tier-3 Impact', 'Tier-1/2 Impact'].map(h => (
                 <th key={h} style={{ padding: '6px 10px', textAlign: 'left', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.4px', color: 'var(--text-3)', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>{h}</th>
               ))}
             </tr>
@@ -1436,7 +1501,7 @@ function PeggingChain({ chain, cell }) {
                   <PRow label="Lead Time"  value={`${comp.leadTimeDays}d`} />
                   {openPO && (
                     <div style={{ marginTop: 4, padding: '3px 7px', borderRadius: 6, background: 'var(--blue-bg)', fontSize: 10, color: 'var(--navy-accent)', fontWeight: 600 }}>
-                      Open PO: {Math.round(openPO.qty).toLocaleString('en-IN')} u · W{openPO.weekDue}
+                      Open PO: {Math.round(openPO.qty).toLocaleString('en-IN')} u · M{openPO.weekDue}
                     </div>
                   )}
                 </PeggingNode>
@@ -1523,7 +1588,7 @@ function PeggingView({ filters, filterOptions }) {
           </select>
         </div>
         <div>
-          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.4px', color: 'var(--text-3)', marginBottom: 4 }}>Week</div>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.4px', color: 'var(--text-3)', marginBottom: 4 }}>Month</div>
           <input type="number" min={1} max={52} value={query.weekNumber} onChange={e => setQ('weekNumber', e.target.value)} style={{ ...s.input, width: 60 }} />
         </div>
         <button onClick={runTrace} disabled={!query.sku || !query.locationId || loading}
@@ -1544,7 +1609,7 @@ function PeggingView({ filters, filterOptions }) {
       {!data && !loading && !traceError && (
         <div style={{ textAlign: 'center', padding: 48, color: 'var(--text-3)', fontSize: 13 }}>
           <GitBranch size={32} strokeWidth={1} style={{ marginBottom: 12, display: 'block', margin: '0 auto 12px' }} />
-          Select a SKU, Location, and Week, then click Trace Chain to see the end-to-end dependency chain.
+          Select a SKU, Location, and Month, then click Trace Chain to see the end-to-end dependency chain.
         </div>
       )}
 
@@ -1698,7 +1763,7 @@ function RecommendationEngine({ recommendations, loading, scenarioId, onApply })
         <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)' }}>{recs.length} recommendations</span>
         {high > 0 && <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: 'rgba(227,24,55,0.12)', color: 'var(--danger)' }}>{high} HIGH</span>}
         {med  > 0 && <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: 'rgba(245,158,11,0.12)', color: 'var(--amber)' }}>{med} MEDIUM</span>}
-        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>W{recommendations.weekRange?.start}–W{recommendations.weekRange?.end} · Scenario {recommendations.scenarioId}</span>
+        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>M{recommendations.weekRange?.start}–M{recommendations.weekRange?.end} · Scenario {recommendations.scenarioId}</span>
       </div>
       {recs.map(rec => <RecCard key={rec.id} rec={rec} scenarioId={scenarioId} onApply={onApply} />)}
     </div>
@@ -2137,7 +2202,7 @@ function ScenarioSimulation({ filters, onSwitchScenario, onResetComplete, showHi
             <div style={{ background: 'var(--card)', borderRadius: 10, border: '1px solid var(--border)', overflow: 'hidden' }}>
               <div style={{ padding: '11px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-1)' }}>
-                  Detailed Comparison — W{comparison.weekRange?.start}–W{comparison.weekRange?.end}
+                  Detailed Comparison — M{comparison.weekRange?.start}–M{comparison.weekRange?.end}
                 </span>
                 <span style={{ fontSize: 10, color: 'var(--text-3)' }}>{compareRows.length} scenarios</span>
               </div>
@@ -2440,7 +2505,7 @@ function WhatIfTab({ filters, filterOptions, actionsMeta, onRefreshGrid }) {
             </select>
           </div>
           <div>
-            <div style={s.label}>Extra hrs/week</div>
+            <div style={s.label}>Extra hrs/mo</div>
             <input type="number" min={1} max={24} value={lp.extraHoursPerWeek}
               onChange={e => setLp(p => ({ ...p, extraHoursPerWeek: parseFloat(e.target.value) || 8 }))}
               style={{ ...s.input, width: 72 }} />
@@ -2479,7 +2544,7 @@ function WhatIfTab({ filters, filterOptions, actionsMeta, onRefreshGrid }) {
               style={{ ...s.input, width: 80 }} />
           </div>
           <div>
-            <div style={s.label}>Week Due</div>
+            <div style={s.label}>Month Due</div>
             <input type="number" min={1} max={52} value={lp.newWeekDue}
               onChange={e => setLp(p => ({ ...p, newWeekDue: parseInt(e.target.value) || filters.weekStart }))}
               style={{ ...s.input, width: 64 }} />
@@ -2553,7 +2618,7 @@ function WhatIfTab({ filters, filterOptions, actionsMeta, onRefreshGrid }) {
           {candError && <div style={{ padding: 12, color: 'var(--danger)', fontSize: 12 }}>{candError}</div>}
           {!candError && !candLoading && candidates.length === 0 && (
             <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>
-              No shortages found for the current filters and week range
+              No shortages found for the current filters and month range
             </div>
           )}
           {candidates.length > 0 && (
@@ -2617,7 +2682,7 @@ function WhatIfTab({ filters, filterOptions, actionsMeta, onRefreshGrid }) {
             <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 18px' }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)', marginBottom: 12 }}>
                 Simulation Results — {leverLabel[lever]}
-                <span style={{ marginLeft: 10, fontSize: 11, fontWeight: 500, color: 'var(--text-3)' }}>W{simResult.weekRange.start}–W{simResult.weekRange.end}</span>
+                <span style={{ marginLeft: 10, fontSize: 11, fontWeight: 500, color: 'var(--text-3)' }}>M{simResult.weekRange.start}–M{simResult.weekRange.end}</span>
               </div>
               <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap' }}>
                 {[

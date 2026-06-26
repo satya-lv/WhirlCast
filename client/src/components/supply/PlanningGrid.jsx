@@ -236,9 +236,9 @@ function buildFlatRows(tree, expandedSkus, expandedLocs, expandedPlants, measure
 // ── Week label helper ─────────────────────────────────────────────────────────
 
 function toRelWeekShort(w) {
-  if (w < 24)   return `W${w}`;
+  if (w < 24)   return `M${w}`;
   if (w === 24) return 'Now';
-  return `+${w - 24}w`;
+  return `+${w - 24}M`;
 }
 
 // ── Value helpers ─────────────────────────────────────────────────────────────
@@ -692,7 +692,7 @@ export default function PlanningGrid({
         background: 'var(--card)', borderBottom: '1px solid var(--border)',
         fontSize: 11, color: 'var(--text-3)',
       }}>
-        <span>{flatRows.length} rows visible · {weeks.length} weeks · {rows.length} SKU-locations</span>
+        <span>{flatRows.length} rows visible · {weeks.length} months · {rows.length} SKU-locations</span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
           <button onClick={expandAll} style={btnStyle}>Expand All</button>
           <button onClick={collapseAll} style={btnStyle}>Collapse All</button>

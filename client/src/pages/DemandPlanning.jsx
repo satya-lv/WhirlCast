@@ -11,6 +11,7 @@
 import React, {
   useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo,
 } from 'react';
+import * as XLSX from 'xlsx';
 import { useNavigate } from 'react-router-dom';
 import { usePersona, getLockedFilter } from '../context/PersonaContext';
 import DemandGrid from '../components/demand/DemandGrid';
@@ -18,6 +19,7 @@ import PatternsTab from '../components/demand/PatternsTab';
 import ExceptionsTab from '../components/demand/ExceptionsTab';
 import WhatIfTab from '../components/demand/WhatIfTab';
 import NPITab from '../components/demand/NPITab';
+import DemandSensing from './DemandSensing';
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 
@@ -86,13 +88,42 @@ async function fetchPatterns(filters) {
   return r.json();
 }
 
+// ── Grid export helpers ───────────────────────────────────────────────────────
+
+function buildDemandExportData(rows, weeks) {
+  const weekLabels = weeks.map(w => w < 24 ? `M${w}` : w === 24 ? 'Now' : `+${w - 24}M`);
+  const headers = ['SKU', 'Location', ...weekLabels];
+  const data = rows.map(r => [
+    r.sku,
+    r.locationName || `Loc${r.locationId}`,
+    ...weeks.map(w => r.cells?.[w]?.finalConsensus ?? 0),
+  ]);
+  return { headers, data };
+}
+
+function downloadDemandCSV(rows, weeks) {
+  const { headers, data } = buildDemandExportData(rows, weeks);
+  const lines = [headers, ...data].map(row =>
+    row.map(v => typeof v === 'string' ? `"${v.replace(/"/g, '""')}"` : v).join(',')
+  );
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'demand_forecast.csv'; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadDemandXLSX(rows, weeks) {
+  const { headers, data } = buildDemandExportData(rows, weeks);
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Demand Forecast');
+  XLSX.writeFile(wb, 'demand_forecast.xlsx');
+}
+
 const FORECAST_MODELS = [
-  'SARIMAX',
-  'Prophet',
-  'Exponential Smoothing',
-  'Moving Average',
-  "Croston's Method",
-  'Linear Regression',
+  'Auto Selected',
+  'SARIMAX', 'Prophet', 'VAR/VARMAX', 'GARCH', 'LSTM', 'Encoder-Decoder',
+  'Multi-Linear Regression', 'Decision Trees', 'Random Forest', 'Boosting-XGB', 'SVM', 'ANN',
 ];
 
 async function fetchRecalculate(modelName, filters) {
@@ -332,9 +363,7 @@ function ModelBar({ selectedModel, onModelChange, onRecalculate, loading }) {
         }}
       >
         {FORECAST_MODELS.map(m => (
-          <option key={m} value={m}>
-            {m}{m === 'SARIMAX' ? ' (current baseline)' : ''}
-          </option>
+          <option key={m} value={m}>{m}</option>
         ))}
       </select>
       <button
@@ -377,7 +406,7 @@ function ComparisonPanel({ result, onFinalize, finalizing, onDismiss }) {
         borderBottom: '1px solid var(--border)',
       }}>
         <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-1)' }}>
-          Comparison: System Forecast vs {modelName} (weeks 24–52)
+          Comparison: System Forecast vs {modelName} (M24–M52)
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontSize: 11, color: 'var(--text-3)' }}>Current:</span>
@@ -413,7 +442,7 @@ function ComparisonPanel({ result, onFinalize, finalizing, onDismiss }) {
       )}
       {isImplemented && fallbackCount > 0 && (
         <div style={{ padding: '5px 16px', background: '#EFF6FF', fontSize: 11, color: '#1D4ED8' }}>
-          {fallbackCount} SKU-location(s) had &lt;3 weeks of history and used SARIMAX as fallback.
+          {fallbackCount} SKU-location(s) had &lt;3 months of history and used SARIMAX as fallback.
         </div>
       )}
 
@@ -423,7 +452,7 @@ function ComparisonPanel({ result, onFinalize, finalizing, onDismiss }) {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
             <thead>
               <tr style={{ background: '#F8FAFC', position: 'sticky', top: 0, zIndex: 1 }}>
-                {['Week', 'Current', modelName, 'Δ Units', 'Δ %'].map(h => (
+                {['Month', 'Current', modelName, 'Δ Units', 'Δ %'].map(h => (
                   <th key={h} style={{
                     padding: '4px 12px', textAlign: h === 'Week' ? 'left' : 'right',
                     fontWeight: 700, color: 'var(--text-3)', letterSpacing: '0.4px',
@@ -439,7 +468,7 @@ function ComparisonPanel({ result, onFinalize, finalizing, onDismiss }) {
                   background: w.diff > 0 ? '#F0FDF4' : w.diff < 0 ? '#FFF7ED' : 'white',
                 }}>
                   <td style={{ padding: '3px 12px', color: 'var(--text-2)', borderBottom: '1px solid rgba(0,0,0,0.04)' }}>
-                    W{w.week}
+                    M{w.week}
                   </td>
                   <td style={{ padding: '3px 12px', textAlign: 'right', borderBottom: '1px solid rgba(0,0,0,0.04)' }}>
                     {w.current.toLocaleString('en-IN')}
@@ -522,12 +551,13 @@ export default function DemandPlanning() {
   const [exceptionsData,    setExceptionsData]    = useState(null);
   const [exceptionsLoading, setExceptionsLoading] = useState(false);
   const [branchAdjBucket,   setBranchAdjBucket]   = useState('all');
-  const [selectedModel,    setSelectedModel]    = useState('SARIMAX');
+  const [selectedModel,    setSelectedModel]    = useState('Auto Selected');
   const [compareResult,    setCompareResult]    = useState(null);
   const [compareLoading,   setCompareLoading]   = useState(false);
   const [finalizeLoading,  setFinalizeLoading]  = useState(false);
 
   const gridContainerRef = useRef();
+  const demandUploadRef  = useRef(null);
   const [gridDims, setGridDims] = useState({ height: 500, width: 900 });
 
   useLayoutEffect(() => {
@@ -812,6 +842,37 @@ export default function DemandPlanning() {
         />
       )}
 
+      {/* Download / Upload toolbar — Forecast Grid only */}
+      {activeView === 'grid' && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6, padding: '4px 12px',
+          borderBottom: '1px solid var(--border)', background: 'var(--card)', flexShrink: 0,
+          justifyContent: 'flex-end',
+        }}>
+          <button
+            onClick={() => downloadDemandXLSX(displayRows, gridWeeks)}
+            disabled={gridLoading || displayRows.length === 0}
+            style={{ fontSize: 11, padding: '3px 10px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text-1)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+          >
+            ↓ Excel
+          </button>
+          <button
+            onClick={() => downloadDemandCSV(displayRows, gridWeeks)}
+            disabled={gridLoading || displayRows.length === 0}
+            style={{ fontSize: 11, padding: '3px 10px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text-1)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+          >
+            ↓ CSV
+          </button>
+          <button
+            onClick={() => demandUploadRef.current?.click()}
+            style={{ fontSize: 11, padding: '3px 10px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text-1)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+          >
+            ↑ Upload
+          </button>
+          <input ref={demandUploadRef} type="file" accept=".xlsx,.csv,.xls" style={{ display: 'none' }} onChange={() => {}} />
+        </div>
+      )}
+
       {/* Forecast Grid tab — always mounted; display:none preserves react-window scroll/expand state */}
       <div
         ref={gridContainerRef}
@@ -888,6 +949,15 @@ export default function DemandPlanning() {
         flexDirection: 'column',
       }}>
         <NPITab lockedSkuFamily={lockedFilter?.field === 'skuFamily' ? lockedFilter.value : null} />
+      </div>
+
+      {/* Demand Sensing tab — always mounted; display:none preserves component state */}
+      <div style={{
+        flex: 1, minHeight: 0, overflowY: 'auto',
+        display: activeView === 'sensing' ? 'flex' : 'none',
+        flexDirection: 'column',
+      }}>
+        <DemandSensing />
       </div>
 
       {/* Cross-module CTA — only when entering via persona flow */}

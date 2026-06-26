@@ -21,9 +21,9 @@ import { getStatusConfig } from '../../utils/statusConfig';
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function toRelWeek(w) {
-  if (w < 24)   return `W${w}`;
-  if (w === 24) return 'Current Week';
-  return `Week +${w - 24}`;
+  if (w < 24)   return `M${w}`;
+  if (w === 24) return 'Current Month';
+  return `M+${w - 24}`;
 }
 
 function fmtINR(v) {

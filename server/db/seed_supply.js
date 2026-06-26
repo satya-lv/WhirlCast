@@ -518,7 +518,7 @@ function seedSupply(force = false) {
   for (const f of fpoData) {
     const pid = plantId[f.plant];
     const lid = lineId[`${pid}:${SKU_LINE_CAT[f.sku]}`];
-    insFPO.run(f.sku, pid, lid, f.wk, 2026, f.qty, 'firm', `Pre-season build wk${f.wk}`);
+    insFPO.run(f.sku, pid, lid, f.wk, 2026, f.qty, 'firm', `Pre-season build M${f.wk}`);
   }
 
   // 14. Purchase orders (main supplier replenishments — reflecting the quarterly PO logic)

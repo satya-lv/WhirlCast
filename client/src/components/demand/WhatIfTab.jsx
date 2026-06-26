@@ -30,9 +30,9 @@ import {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function toRelWeek(w) {
-  if (w < 24)   return `W${w}`;
-  if (w === 24) return 'Current Week';
-  return `Week +${w - 24}`;
+  if (w < 24)   return `M${w}`;
+  if (w === 24) return 'Current Month';
+  return `M+${w - 24}`;
 }
 
 function fmtINR(v) {
@@ -114,7 +114,7 @@ function ChartTooltip({ active, payload, label }) {
       borderRadius: 8, padding: '8px 12px', fontSize: 11,
       boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
     }}>
-      <div style={{ fontWeight: 700, marginBottom: 4 }}>Week {label}</div>
+      <div style={{ fontWeight: 700, marginBottom: 4 }}>Month {label}</div>
       {base && (
         <div style={{ color: '#1D4ED8' }}>
           Base: {Math.round(base.value).toLocaleString('en-IN')} units
@@ -198,9 +198,9 @@ function WeekRangeSelector({ result, preset, onPreset, customFrom, customTo, onC
   const wk4end   = weeks[3]?.weekNumber;
 
   const presets = [
-    { id: 'all',    label: `All ${weeks.length} weeks (${firstWk}–${lastWk})` },
-    wk13end ? { id: '13', label: `Weeks ${firstWk}–${wk13end} (13 wks)` } : null,
-    wk4end  ? { id: '4',  label: `Weeks ${firstWk}–${wk4end} (4 wks)`   } : null,
+    { id: 'all',    label: `All ${weeks.length} months (${firstWk}–${lastWk})` },
+    wk13end ? { id: '13', label: `Months ${firstWk}–${wk13end} (13 mo)` } : null,
+    wk4end  ? { id: '4',  label: `Months ${firstWk}–${wk4end} (4 mo)`   } : null,
     { id: 'custom', label: 'Custom range' },
   ].filter(Boolean);
 
@@ -214,7 +214,7 @@ function WeekRangeSelector({ result, preset, onPreset, customFrom, customTo, onC
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.4px',
         textTransform: 'uppercase', color: 'var(--text-3)' }}>
-        Apply to weeks
+        Apply to months
       </span>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
         {presets.map(p => (
@@ -272,7 +272,7 @@ function ConfirmDialog({ result, selectedWeeks, selectedImpact, onConfirm, onCan
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <ConfirmRow label="SKU"             value={result.sku.replace(/_/g, ' ')} />
           <ConfirmRow label="Location"        value={result.locationName} />
-          <ConfirmRow label="Weeks"           value={`${firstWk}–${lastWk}  (${n} week${n !== 1 ? 's' : ''})`} />
+          <ConfirmRow label="Months"           value={`${firstWk}–${lastWk}  (${n} month${n !== 1 ? 's' : ''})`} />
           <ConfirmRow
             label="Volume impact"
             value={`${selectedImpact.volumeImpact >= 0 ? '+' : ''}${selectedImpact.volumeImpact.toLocaleString('en-IN')} units (${selectedImpact.volumeImpactPct >= 0 ? '+' : ''}${selectedImpact.volumeImpactPct}%)`}
@@ -280,7 +280,7 @@ function ConfirmDialog({ result, selectedWeeks, selectedImpact, onConfirm, onCan
         </div>
 
         <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.6 }}>
-          For each selected week, Planner Adjustment will be set to:
+          For each selected month, Planner Adjustment will be set to:
           <br /><strong>Scenario Volume − System Forecast</strong>
         </div>
 
@@ -290,7 +290,7 @@ function ConfirmDialog({ result, selectedWeeks, selectedImpact, onConfirm, onCan
           lineHeight: 1.6,
         }}>
           ⚠ This will <strong>OVERWRITE</strong> any existing Planner Adjustment values
-          in weeks {firstWk}–{lastWk}, including manual edits made directly in the Forecast Grid.
+          in months {firstWk}–{lastWk}, including manual edits made directly in the Forecast Grid.
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
@@ -313,7 +313,7 @@ function ConfirmDialog({ result, selectedWeeks, selectedImpact, onConfirm, onCan
               cursor: 'pointer',
             }}
           >
-            Apply {n} week{n !== 1 ? 's' : ''}
+            Apply {n} month{n !== 1 ? 's' : ''}
           </button>
         </div>
       </div>
@@ -506,7 +506,7 @@ export default function WhatIfTab({ filterOptions, lockedFilter, onApplyComplete
         // Verify the DB actually reflects what we sent — catches any silent mismatch
         if (!body.success || body.updated?.marketingAdjustment !== newAdj) {
           throw new Error(
-            `Week ${w.weekNumber}: server confirmed marketingAdjustment=${body.updated?.marketingAdjustment}, expected ${newAdj}`
+            `Month ${w.weekNumber}: server confirmed marketingAdjustment=${body.updated?.marketingAdjustment}, expected ${newAdj}`
           );
         }
         written.push(before[i]);
@@ -541,15 +541,15 @@ export default function WhatIfTab({ filterOptions, lockedFilter, onApplyComplete
         if (rollbackFailed && written.length > 0) {
           const rbEnd = written[written.length - 1].weekNumber;
           setApplyError(
-            `Apply failed at week ${w.weekNumber} and rollback could not complete. ` +
-            `Weeks ${selectedWeeks[0].weekNumber}–${rbEnd} may be inconsistent — ` +
+            `Apply failed at month ${w.weekNumber} and rollback could not complete. ` +
+            `Months ${selectedWeeks[0].weekNumber}–${rbEnd} may be inconsistent — ` +
             `please refresh the Forecast Grid to check.`
           );
         } else {
           setApplyError(
             written.length > 0
-              ? `Apply failed at week ${w.weekNumber} — all changes were rolled back. Please try again.`
-              : `Apply failed at week ${w.weekNumber} — no changes were made. Please try again.`
+              ? `Apply failed at month ${w.weekNumber} — all changes were rolled back. Please try again.`
+              : `Apply failed at month ${w.weekNumber} — no changes were made. Please try again.`
           );
         }
         return;
@@ -771,8 +771,8 @@ export default function WhatIfTab({ filterOptions, lockedFilter, onApplyComplete
               <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                 <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-1)' }}>
                   {applyPhase === 'applying'
-                    ? `Applying… (${applyProgress.done} / ${applyProgress.total} weeks)`
-                    : `Rolling back… (${applyProgress.done} / ${applyProgress.total} weeks)`}
+                    ? `Applying… (${applyProgress.done} / ${applyProgress.total} months)`
+                    : `Rolling back… (${applyProgress.done} / ${applyProgress.total} months)`}
                 </span>
                 <span style={{ fontSize: 10, color: 'var(--text-3)' }}>
                   {applyPhase === 'applying'
@@ -793,7 +793,7 @@ export default function WhatIfTab({ filterOptions, lockedFilter, onApplyComplete
               <span style={{ fontSize: 20, color: '#16A34A' }}>✓</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <span style={{ fontSize: 12, fontWeight: 700, color: '#15803D' }}>
-                  Scenario applied to {appliedCount} week{appliedCount !== 1 ? 's' : ''}
+                  Scenario applied to {appliedCount} month{appliedCount !== 1 ? 's' : ''}
                 </span>
                 <span style={{ fontSize: 10, color: '#166534' }}>
                   Planner Adjustments updated · Forecast Grid shows new values on next tab visit · Resetting in 3 s…
@@ -903,13 +903,13 @@ function ResultsPanel({ result }) {
       {/* Impact KPIs */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <ImpactKpi
-          label="Volume Impact (26 wks)"
+          label="Volume Impact (26 mo)"
           value={summary.volumeImpact}
           valueStr={fmtVol(summary.volumeImpact)}
           pct={summary.volumeImpactPct}
         />
         <ImpactKpi
-          label="Revenue Impact (26 wks)"
+          label="Revenue Impact (26 mo)"
           value={summary.revenueImpact}
           valueStr={fmtINR(summary.revenueImpact)}
           pct={summary.baseRevenue > 0
@@ -924,7 +924,7 @@ function ResultsPanel({ result }) {
         borderRadius: 'var(--radius-md, 10px)', padding: '12px 14px',
       }}>
         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-1)', marginBottom: 8 }}>
-          Base Forecast vs Scenario — Weekly Volume
+          Base Forecast vs Scenario — Monthly Volume
         </div>
         <ResponsiveContainer width="100%" height={220}>
           <LineChart data={weeks} margin={{ top: 4, right: 16, bottom: 4, left: 8 }}>

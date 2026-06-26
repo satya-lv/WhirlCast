@@ -90,7 +90,7 @@ function regressionSlope(values) {
 //   Stable   = remainder
 function classifyPattern(weeklyTotals) {
   const n = weeklyTotals.length;
-  if (n < 4) return { patternType: 'Stable', h1h2Ratio: 1, slopePctOfMean: 0 };
+  if (n < 4) return { patternType: 'Intermittent', h1h2Ratio: 1, slopePctOfMean: 0 };
 
   const h1Mean = weeklyTotals.slice(0, 26).reduce((a, b) => a + b, 0) / 26;
   const h2Mean = weeklyTotals.slice(26, 52).reduce((a, b) => a + b, 0) / 26;
@@ -111,7 +111,7 @@ function classifyPattern(weeklyTotals) {
   if      (h1h2Ratio > 2.0)       patternType = 'Seasonal';
   else if (slopePctOfMean > 0.05)  patternType = 'Trend';
   else if (cov >= 0.5)             patternType = 'Random';
-  else                             patternType = 'Stable';
+  else                             patternType = 'Intermittent';
 
   return { patternType, h1h2Ratio, slopePctOfMean };
 }
@@ -119,12 +119,9 @@ function classifyPattern(weeklyTotals) {
 // ── Model forecasting helpers ──────────────────────────────────────────────
 
 const FORECAST_MODELS = [
-  'SARIMAX',
-  'Prophet',
-  'Exponential Smoothing',
-  'Moving Average',
-  "Croston's Method",
-  'Linear Regression',
+  'Auto Selected',
+  'SARIMAX', 'Prophet', 'VAR/VARMAX', 'GARCH', 'LSTM', 'Encoder-Decoder',
+  'Multi-Linear Regression', 'Decision Trees', 'Random Forest', 'Boosting-XGB', 'SVM', 'ANN',
 ];
 const PROPHET_PHI = 0.90;  // damping factor (Gardner & McKenzie 1985)
 
@@ -577,7 +574,7 @@ router.get('/patterns', (req, res) => {
     }
 
     // ── classificationDistribution ───────────────────────────────────────
-    const counts = { Seasonal: 0, Trend: 0, Random: 0, Stable: 0 };
+    const counts = { Seasonal: 0, Trend: 0, Random: 0, Intermittent: 0 };
     for (const pm of visiblePm) {
       const { patternType } = classificationBySku[pm.sku] || {};
       if (patternType && counts[patternType] !== undefined) counts[patternType]++;
@@ -587,7 +584,7 @@ router.get('/patterns', (req, res) => {
       counts,
       total: visiblePm.length,
       methodology:
-        'Seasonal = H1/H2 demand ratio > 2.0; Trend = |regression slope| > 5% of mean/week; Random = CoV ≥ 0.5 and not Seasonal; Stable = remainder. Computed from national weekly totals (SUM across 8 locations) in demand_weekly_data.',
+        'Seasonal = H1/H2 demand ratio > 2.0; Trend = |regression slope| > 5% of mean/week; Random = CoV ≥ 0.5 and not Seasonal; Intermittent = remainder. Computed from national weekly totals (SUM across 8 locations) in demand_weekly_data.',
       bySku: visiblePm.map(pm => ({
         sku:            pm.sku,
         patternType:    classificationBySku[pm.sku].patternType,
@@ -636,7 +633,7 @@ router.get('/patterns', (req, res) => {
       category:     r.category,
       abcClass:     r.abcClass,
       xyzClass:     r.xyzClass,
-      patternType:  (classificationBySku[r.sku] || {}).patternType || 'Stable',
+      patternType:  (classificationBySku[r.sku] || {}).patternType || 'Intermittent',
       cov:          parseFloat((r.cov || 0).toFixed(3)),
       annualVolume: Math.round(r.annualVolume),
       weeklyAvg:    parseFloat((r.weeklyAvg  || 0).toFixed(1)),
@@ -700,7 +697,9 @@ router.get('/exceptions', (req, res) => {
       params.push(parseInt(req.query.acknowledged));
     }
 
-    const whereClause = conds.length > 0 ? 'WHERE ' + conds.join(' AND ') : '';
+    // Always restrict to current/future planning periods (week >= 24)
+    conds.push(`de.week_number >= ${EDITABLE_FROM_WEEK}`);
+    const whereClause = 'WHERE ' + conds.join(' AND ');
 
     const rows = db.prepare(`
       SELECT de.exception_id    AS exceptionId,
@@ -958,7 +957,7 @@ router.post('/model/recalculate', (req, res) => {
       });
     }
 
-    const isImplemented = modelName === 'Prophet';
+    const isImplemented = modelName === 'Prophet' || modelName === 'SARIMAX' || modelName === 'Auto Selected';
     const weekTotals    = {};
     const rows          = [];
     let fallbackCount   = 0;
