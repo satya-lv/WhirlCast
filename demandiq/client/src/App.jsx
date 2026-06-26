@@ -53,11 +53,6 @@ function AppLayout() {
         <Route path="/admin" element={<ProtectedRoute allowedRoles={['admin']}><AdminConsole /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-      {isAuthenticated && (
-        <footer style={{ textAlign: 'center', padding: '12px', fontSize: 11, color: 'var(--text-3)' }}>
-          Powered by DecisionPoint Analytics
-        </footer>
-      )}
     </div>
   );
 }

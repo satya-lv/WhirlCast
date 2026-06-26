@@ -11,7 +11,7 @@
  *   └── Location (expands when SKU is open)
  *       ├── Actual Sales        (read-only)
  *       ├── System Forecast     (read-only)
- *       ├── Marketing Adj       (editable per persona)
+ *       ├── Planner Adj         (editable per persona)
  *       ├── Branch Adj          (editable per persona)
  *       ├── Category Adj        (editable per persona)
  *       └── Final Consensus     (read-only; = System + Mktg + Branch + Cat)
@@ -35,7 +35,7 @@ const TOOLBAR_H = 33;
 const DEMAND_MEASURES = [
   { key: 'actualSales',          label: 'Actual Sales',    fmt: 'int' },
   { key: 'systemForecast',       label: 'System Forecast', fmt: 'int' },
-  { key: 'marketingAdjustment',  label: 'Marketing Adj',   fmt: 'int', editable: true },
+  { key: 'marketingAdjustment',  label: 'Planner Adj',     fmt: 'int', editable: true },
   { key: 'branchAdjustment',     label: 'Branch Adj',      fmt: 'int', editable: true },
   { key: 'categoryAdjustment',   label: 'Category Adj',    fmt: 'int', editable: true },
   { key: 'finalConsensus',       label: 'Final Consensus', fmt: 'int' },

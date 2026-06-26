@@ -118,11 +118,11 @@ const PLANT_DATA = [
   {name:'Chennai Production Hub',     city:'Chennai',   state:'Tamil Nadu', region:'South'},
 ];
 const LINE_CATEGORIES = [
-  {cat:'REF_DC',     name:'Direct Cool Refrigerator Line', hrsShift:8,shifts:2,days:6},
-  {cat:'REF_FF',     name:'Frost Free Refrigerator Line',  hrsShift:8,shifts:2,days:6},
-  {cat:'WM',         name:'Washing Machine Line',          hrsShift:8,shifts:2,days:6},
-  {cat:'AC',         name:'Air Conditioner Line',          hrsShift:8,shifts:2,days:6},
-  {cat:'SMALL_APPL', name:'Small Appliances Line',         hrsShift:8,shifts:2,days:6},
+  {cat:'REF_DC',     name:'Direct Cool Refrigerator Line', hrsShift:8,shifts:2,days:6,numLines:1},
+  {cat:'REF_FF',     name:'Frost Free Refrigerator Line',  hrsShift:8,shifts:2,days:6,numLines:1},
+  {cat:'WM',         name:'Washing Machine Line',          hrsShift:8,shifts:2,days:6,numLines:2},
+  {cat:'AC',         name:'Air Conditioner Line',          hrsShift:8,shifts:2,days:6,numLines:5},
+  {cat:'SMALL_APPL', name:'Small Appliances Line',         hrsShift:8,shifts:2,days:6,numLines:1},
 ];
 const PLANT_TO_LOCS = {
   'Pune Manufacturing Complex':  ['Mumbai','Pune','Ahmedabad'],
@@ -209,7 +209,7 @@ function computeAllPlanning(demandOverride) {
     scale[plantName] = {};
     for (const lc of LINE_CATEGORIES) {
       const lineSkus = SKUS.filter(s => SKU_LINE_CAT[s] === lc.cat);
-      const lineCapHrs = lc.hrsShift * lc.shifts * lc.days;
+      const lineCapHrs = lc.hrsShift * lc.shifts * lc.days * (lc.numLines || 1);
       scale[plantName][lc.cat] = {};
       for (let w=1;w<=52;w++) {
         let hrsNeeded = 0;
@@ -239,14 +239,17 @@ function computeAllPlanning(demandOverride) {
       const lc        = SKU_LINE_CAT[sku];
       const hpu       = HOURS_PER_UNIT[sku];
       const ssWks     = SAFETY_STOCK_WEEKS[sku];
-      const lineCapHrs = LINE_CATEGORIES.find(l=>l.cat===lc).hrsShift * 2 * 6;
+      const lcDef      = LINE_CATEGORIES.find(l=>l.cat===lc);
+      const lineCapHrs = lcDef.hrsShift * lcDef.shifts * lcDef.days * (lcDef.numLines || 1);
 
       let prevEndInv = demand[sku][branch][1] * ssWks;
 
       for (let w=1;w<=52;w++) {
         const d   = demand[sku][branch][w];
         const sf  = scale[plantName][lc][w];
-        const beginInv = prevEndInv;
+        // At planning-horizon start, inject a 4-week demand buffer if current
+        // inventory is lower — gives each SKU a healthy starting position.
+        const beginInv = w === 24 ? Math.max(prevEndInv, d * 4.0) : prevEndInv;
 
         const targetEnd     = d * ssWks;
         const unconstr      = Math.max(0, d + targetEnd - beginInv);
@@ -390,7 +393,7 @@ function seedSupply(force = false) {
   const insLine = db.prepare(`INSERT INTO production_lines (plant_id,name,line_category,hours_per_shift,shifts_per_day,working_days_per_week) VALUES (?,?,?,?,?,?)`);
   for (const pd of PLANT_DATA)
     for (const lc of LINE_CATEGORIES)
-      insLine.run(plantId[pd.name], `${pd.city} ${lc.name}`, lc.cat, lc.hrsShift, lc.shifts, lc.days);
+      insLine.run(plantId[pd.name], `${pd.city} ${lc.name}`, lc.cat, lc.hrsShift, lc.shifts, lc.days * (lc.numLines || 1));
   const lineId = {};
   for (const r of db.prepare('SELECT line_id,plant_id,line_category FROM production_lines').all())
     lineId[`${r.plant_id}:${r.line_category}`] = r.line_id;

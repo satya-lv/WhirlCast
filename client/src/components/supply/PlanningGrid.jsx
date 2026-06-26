@@ -16,8 +16,9 @@
  *   │  hidden)  │                                                 │
  *   └─────────────────────────────────────────────────────────────┘
  *
- * Hierarchy: SKU → Location → Plant → Production Line, each expandable.
- * Measure sub-rows appear under each Line row (3-4 per group).
+ * Hierarchy: SKU → Plant/Line (2 levels). Each plant/line row expands
+ * to measure sub-rows. The intermediate Location grouping is removed —
+ * location name appears as secondary text on the plant/line row.
  * Measure group selector (Demand / Supply / Constraints) is external.
  */
 import React, {
@@ -51,12 +52,11 @@ export const MEASURE_GROUPS = {
     accentColor: 'var(--green)',
     bgLight: '#F0FDF4',
     measures: [
-      { key: 'forecastDemand',     label: 'Demand',      fmt: 'int' },
-      { key: 'beginningInventory', label: 'Inventory',   fmt: 'int' },
-      { key: 'plannedProduction',  label: 'Production',  fmt: 'int', editable: true },
-      { key: 'shortageQty',        label: 'Gap',         fmt: 'int' },
-      { key: 'gapVsSS',            label: 'Gap vs SS',   fmt: 'int' },
-      { key: 'daysOfCover',        label: 'DoC (days)',  fmt: 'dec1', noAgg: true },
+      { key: 'forecastDemand',     label: 'Demand',     fmt: 'int' },
+      { key: 'beginningInventory', label: 'Inventory',  fmt: 'int' },
+      { key: 'plannedProduction',  label: 'Production', fmt: 'int', editable: true },
+      { key: 'shortageQty',        label: 'Gap',        fmt: 'int' },
+      { key: 'daysOfCover',        label: 'DoC (days)', fmt: 'dec1', noAgg: true },
     ],
   },
   constraints: {
@@ -76,47 +76,34 @@ export const MEASURE_GROUPS = {
 //
 // apiRows: array from /api/supply/grid — each row is one (sku × location)
 // with cells nested as { [weekNumber]: { forecastDemand, ... } }
+//
+// Produces a 2-level tree: sku → leaf rows (one per location, labeled by plant+line).
 
 function buildTree(apiRows, measureDefs) {
   const measureKeys = measureDefs.map(m => m.key);
   const noAggKeys   = new Set(measureDefs.filter(m => m.noAgg).map(m => m.key));
 
-  const skuOrder   = [];
-  const locOrder   = new Map();   // sku → [locationId]
-  const plantOrder = new Map();   // locKey → [plantId]
-  const lineOrder  = new Map();   // plantKey → [lineId]
-  const locMeta    = new Map();   // locKey → { name, region }
-  const plantMeta  = new Map();   // plantKey → { name }
-  const lineMeta   = new Map();   // lineKey → { name }
-  const leafData   = new Map();   // lineKey → { [week]: { mk: value } }
-  const lineApiRow = new Map();   // lineKey → original API row (for POST actions)
+  const skuOrder  = [];
+  const leafOrder = new Map();   // sku → [locationId]
+  const leafMeta  = new Map();   // leafKey (sku|locId) → { plantName, lineName, locationName, region }
+  const leafData  = new Map();   // leafKey → { [week]: { mk: value } }
+  const lineApiRow = new Map();  // leafKey → original API row (for POST actions)
 
   for (const apiRow of apiRows) {
     const {
       sku, locationId, locationName, region,
-      plantId, plantName,
-      productionLineId, lineName,
-      safetyStockWeeks = 0,
+      plantName, lineName,
       cells = {},
     } = apiRow;
 
-    const locKey   = `${sku}|${locationId}`;
-    const plantKey = `${locKey}|${plantId}`;
-    const lineKey  = `${plantKey}|${productionLineId}`;
+    const leafKey = `${sku}|${locationId}`;
 
-    if (!skuOrder.includes(sku))                  skuOrder.push(sku);
-    if (!locOrder.has(sku))                        locOrder.set(sku, []);
-    if (!locOrder.get(sku).includes(locationId))   locOrder.get(sku).push(locationId);
-    if (!plantOrder.has(locKey))                   plantOrder.set(locKey, []);
-    if (!plantOrder.get(locKey).includes(plantId)) plantOrder.get(locKey).push(plantId);
-    if (!lineOrder.has(plantKey))                  lineOrder.set(plantKey, []);
-    if (!lineOrder.get(plantKey).includes(productionLineId))
-      lineOrder.get(plantKey).push(productionLineId);
+    if (!skuOrder.includes(sku))                    skuOrder.push(sku);
+    if (!leafOrder.has(sku))                         leafOrder.set(sku, []);
+    if (!leafOrder.get(sku).includes(locationId))    leafOrder.get(sku).push(locationId);
 
-    locMeta.set(locKey,   { name: locationName, region });
-    plantMeta.set(plantKey, { name: plantName });
-    lineMeta.set(lineKey,   { name: lineName });
-    lineApiRow.set(lineKey, apiRow);
+    leafMeta.set(leafKey, { plantName, lineName, locationName, region });
+    lineApiRow.set(leafKey, apiRow);
 
     // Store leaf data keyed by week number
     const wmap = {};
@@ -124,12 +111,6 @@ function buildTree(apiRows, measureDefs) {
       const w = parseInt(wkStr, 10);
       const vals = {};
       for (const mk of measureKeys) vals[mk] = cell[mk] ?? 0;
-      // Derived measures — computed from raw cell fields, not present in API response
-      if ('gapVsSS' in vals) {
-        const fd = cell.forecastDemand ?? 0;
-        const ei = cell.endingInventory ?? 0;
-        vals.gapVsSS = ei - (safetyStockWeeks * fd);
-      }
       if ('daysOfCover' in vals) {
         const fd = cell.forecastDemand ?? 0;
         const ei = cell.endingInventory ?? 0;
@@ -137,13 +118,11 @@ function buildTree(apiRows, measureDefs) {
       }
       wmap[w] = vals;
     }
-    leafData.set(lineKey, wmap);
+    leafData.set(leafKey, wmap);
   }
 
-  // ── Aggregate upward ──────────────────────────────────────────────────────
-  const plantAgg = new Map();  // plantKey → { week → { mk → sum } }
-  const locAgg   = new Map();
-  const skuAgg   = new Map();
+  // Aggregate leaf rows up to SKU level
+  const skuAgg = new Map();
 
   const addTo = (mapRef, key, w, vals) => {
     if (!mapRef.has(key)) mapRef.set(key, {});
@@ -156,37 +135,24 @@ function buildTree(apiRows, measureDefs) {
   };
 
   for (const sku of skuOrder) {
-    for (const locId of (locOrder.get(sku) || [])) {
-      const locKey = `${sku}|${locId}`;
-      for (const plantId of (plantOrder.get(locKey) || [])) {
-        const plantKey = `${locKey}|${plantId}`;
-        for (const lineId of (lineOrder.get(plantKey) || [])) {
-          const lineKey = `${plantKey}|${lineId}`;
-          for (const [wStr, vals] of Object.entries(leafData.get(lineKey) || {})) {
-            const w = parseInt(wStr, 10);
-            addTo(plantAgg, plantKey, w, vals);
-            addTo(locAgg,   locKey,   w, vals);
-            addTo(skuAgg,   sku,      w, vals);
-          }
-        }
+    for (const locId of (leafOrder.get(sku) || [])) {
+      const leafKey = `${sku}|${locId}`;
+      for (const [wStr, vals] of Object.entries(leafData.get(leafKey) || {})) {
+        addTo(skuAgg, sku, parseInt(wStr, 10), vals);
       }
     }
   }
 
-  return {
-    skuOrder, locOrder, plantOrder, lineOrder,
-    locMeta, plantMeta, lineMeta, lineApiRow,
-    leafData, plantAgg, locAgg, skuAgg,
-  };
+  return { skuOrder, leafOrder, leafMeta, leafData, lineApiRow, skuAgg };
 }
 
 // ── Flat row list ─────────────────────────────────────────────────────────────
 //
 // Produces the ordered array of virtual rows based on current expand state.
-// Row types: 'sku' | 'location' | 'plant' | 'line' | 'measure'
+// Row types: 'sku' | 'plantline' | 'measure'
 
-function buildFlatRows(tree, expandedSkus, expandedLocs, expandedPlants, measureDefs) {
-  const { skuOrder, locOrder, plantOrder, lineOrder, locMeta, plantMeta, lineMeta } = tree;
+function buildFlatRows(tree, expandedSkus, expandedLeaves, measureDefs) {
+  const { skuOrder, leafOrder, leafMeta } = tree;
   const result = [];
 
   for (const sku of skuOrder) {
@@ -194,38 +160,28 @@ function buildFlatRows(tree, expandedSkus, expandedLocs, expandedPlants, measure
 
     if (!expandedSkus.has(sku)) continue;
 
-    for (const locId of (locOrder.get(sku) || [])) {
-      const locKey  = `${sku}|${locId}`;
-      const locName = locMeta.get(locKey)?.name ?? `Loc ${locId}`;
-      result.push({ type: 'location', key: locKey, label: locName, sku, locId });
+    for (const locId of (leafOrder.get(sku) || [])) {
+      const leafKey = `${sku}|${locId}`;
+      const meta    = leafMeta.get(leafKey) || {};
+      result.push({
+        type: 'plantline', key: leafKey, lineKey: leafKey,
+        sku, locId,
+        label:    `${meta.plantName || ''} · ${meta.lineName || ''}`,
+        subLabel: meta.locationName || '',
+      });
 
-      if (!expandedLocs.has(locKey)) continue;
+      if (!expandedLeaves.has(leafKey)) continue;
 
-      for (const plantId of (plantOrder.get(locKey) || [])) {
-        const plantKey  = `${locKey}|${plantId}`;
-        const plantName = plantMeta.get(plantKey)?.name ?? `Plant ${plantId}`;
-        result.push({ type: 'plant', key: plantKey, label: plantName, sku, locId, plantId });
-
-        if (!expandedPlants.has(plantKey)) continue;
-
-        for (const lineId of (lineOrder.get(plantKey) || [])) {
-          const lineKey  = `${plantKey}|${lineId}`;
-          const lineName = lineMeta.get(lineKey)?.name ?? `Line ${lineId}`;
-          result.push({ type: 'line', key: lineKey, label: lineName, sku, locId, plantId, lineId, lineKey });
-
-          // Measure sub-rows — one per measure in the active group
-          for (const mDef of measureDefs) {
-            result.push({
-              type: 'measure',
-              key: `${lineKey}|${mDef.key}`,
-              lineKey, sku, locId, plantId, lineId,
-              measureKey: mDef.key,
-              measureLabel: mDef.label,
-              measureFmt: mDef.fmt,
-              editable: !!mDef.editable,
-            });
-          }
-        }
+      for (const mDef of measureDefs) {
+        result.push({
+          type: 'measure',
+          key: `${leafKey}|${mDef.key}`,
+          lineKey: leafKey, sku, locId,
+          measureKey: mDef.key,
+          measureLabel: mDef.label,
+          measureFmt: mDef.fmt,
+          editable: !!mDef.editable,
+        });
       }
     }
   }
@@ -251,9 +207,7 @@ function getMeasureValue(row, week, tree) {
 
 function getAggValue(row, week, primaryMeasureKey, tree) {
   if (!primaryMeasureKey) return null;
-  if (row.type === 'plant')    return tree.plantAgg.get(row.key)?.[week]?.[primaryMeasureKey] ?? null;
-  if (row.type === 'location') return tree.locAgg.get(row.key)?.[week]?.[primaryMeasureKey] ?? null;
-  if (row.type === 'sku')      return tree.skuAgg.get(row.key)?.[week]?.[primaryMeasureKey] ?? null;
+  if (row.type === 'sku') return tree.skuAgg.get(row.key)?.[week]?.[primaryMeasureKey] ?? null;
   return null;
 }
 
@@ -272,14 +226,12 @@ function skuDisplayLabel(sku) {
 // ── Row styling ───────────────────────────────────────────────────────────────
 
 const ROW_STYLES = {
-  sku:      { bg: 'var(--navy-accent)', fg: 'white',                    fw: 700, fs: 11 },
-  location: { bg: '#1e3a5f',            fg: 'rgba(255,255,255,0.88)',   fw: 600, fs: 11 },
-  plant:    { bg: 'var(--blue-bg)',     fg: 'var(--text-1)',            fw: 500, fs: 11 },
-  line:     { bg: '#F5F7FA',            fg: 'var(--text-2)',            fw: 500, fs: 10 },
-  measure:  { bg: 'white',              fg: 'var(--text-1)',            fw: 400, fs: 11 },
+  sku:       { bg: 'var(--navy-accent)', fg: 'white',          fw: 700, fs: 11 },
+  plantline: { bg: 'var(--blue-bg)',     fg: 'var(--text-1)',  fw: 500, fs: 11 },
+  measure:   { bg: 'white',              fg: 'var(--text-1)',  fw: 400, fs: 11 },
 };
 
-const INDENTS = { sku: 10, location: 22, plant: 36, line: 50, measure: 56 };
+const INDENTS = { sku: 10, plantline: 22, measure: 34 };
 
 function getCellHighlight(measureKey, value) {
   if (measureKey === 'shortageQty' && value > 0)
@@ -288,8 +240,6 @@ function getCellHighlight(measureKey, value) {
     if (value < 7)  return '#FEE2E2';
     if (value < 14) return '#FEF3C7';
   }
-  if (measureKey === 'gapVsSS' && value != null && value < 0)
-    return '#FEE2E2';
   if (measureKey === 'daysOfCover' && value != null) {
     if (value < 7)  return '#FEE2E2';
     if (value < 14) return '#FEF3C7';
@@ -308,35 +258,17 @@ const NoScrollOuter = forwardRef(({ style, ...rest }, ref) => (
 
 const LeftCell = memo(({ index, style, data }) => {
   const {
-    flatRows, expandedSkus, expandedLocs, expandedPlants,
-    toggleSku, toggleLoc, togglePlant, accentColor, onTakeAction,
+    flatRows, expandedSkus, expandedLeaves,
+    toggleSku, toggleLeaf, accentColor, onTakeAction,
   } = data;
 
   const row = flatRows[index];
   if (!row) return <div style={style} />;
 
-  const rs      = ROW_STYLES[row.type] || ROW_STYLES.measure;
-  const indent  = INDENTS[row.type] || 10;
-  let label, chevron, onClick;
+  const rs     = ROW_STYLES[row.type] || ROW_STYLES.measure;
+  const indent = INDENTS[row.type] || 10;
 
-  if (row.type === 'sku') {
-    const open = expandedSkus.has(row.key);
-    onClick = () => toggleSku(row.key);
-    label   = skuDisplayLabel(row.sku);
-    chevron = open ? <ChevronDown size={11} /> : <ChevronRight size={11} />;
-  } else if (row.type === 'location') {
-    const open = expandedLocs.has(row.key);
-    onClick = () => toggleLoc(row.key);
-    label   = row.label;
-    chevron = open ? <ChevronDown size={11} /> : <ChevronRight size={11} />;
-  } else if (row.type === 'plant') {
-    const open = expandedPlants.has(row.key);
-    onClick = () => togglePlant(row.key);
-    label   = row.label;
-    chevron = open ? <ChevronDown size={11} /> : <ChevronRight size={11} />;
-  } else if (row.type === 'line') {
-    label = row.label;
-  } else if (row.type === 'measure') {
+  if (row.type === 'measure') {
     return (
       <div style={{
         ...style, background: rs.bg,
@@ -356,51 +288,88 @@ const LeftCell = memo(({ index, style, data }) => {
     );
   }
 
-  return (
-    <div
-      onClick={onClick}
-      style={{
-        ...style, background: rs.bg,
-        display: 'flex', alignItems: 'center',
-        paddingLeft: indent, paddingRight: 6,
-        borderBottom: '1px solid rgba(255,255,255,0.06)',
-        cursor: onClick ? 'pointer' : 'default',
-        userSelect: 'none', overflow: 'hidden',
-      }}
-    >
-      {chevron && (
+  if (row.type === 'sku') {
+    const open = expandedSkus.has(row.key);
+    return (
+      <div
+        onClick={() => toggleSku(row.key)}
+        style={{
+          ...style, background: rs.bg,
+          display: 'flex', alignItems: 'center',
+          paddingLeft: indent, paddingRight: 6,
+          borderBottom: '1px solid rgba(255,255,255,0.06)',
+          cursor: 'pointer', userSelect: 'none', overflow: 'hidden',
+        }}
+      >
         <span style={{ color: rs.fg, opacity: 0.6, flexShrink: 0, marginRight: 4, display: 'flex' }}>
-          {chevron}
+          {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
         </span>
-      )}
-      <span style={{
-        fontSize: rs.fs, fontWeight: rs.fw, color: rs.fg,
-        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-        flex: 1,
-      }}>
-        {label}
-      </span>
-      {row.type === 'location' && onTakeAction && (
-        <button
-          onClick={e => { e.stopPropagation(); onTakeAction(row.sku, row.locId); }}
-          title="Take Action"
-          style={{
-            flexShrink: 0, marginLeft: 4,
-            background: 'rgba(255,255,255,0.15)',
-            border: '1px solid rgba(255,255,255,0.28)',
-            borderRadius: 4,
-            padding: '2px 4px',
-            cursor: 'pointer',
-            display: 'flex', alignItems: 'center',
-            color: 'rgba(255,255,255,0.82)',
-            lineHeight: 1,
-          }}
-        >
-          <Zap size={11} />
-        </button>
-      )}
-    </div>
-  );
+        <span style={{
+          fontSize: rs.fs, fontWeight: rs.fw, color: rs.fg,
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1,
+        }}>
+          {skuDisplayLabel(row.sku)}
+        </span>
+      </div>
+    );
+  }
+
+  // plantline row — two-line label: plant·line (primary) + city (secondary)
+  if (row.type === 'plantline') {
+    const open = expandedLeaves.has(row.key);
+    return (
+      <div
+        onClick={() => toggleLeaf(row.key)}
+        style={{
+          ...style, background: rs.bg,
+          display: 'flex', alignItems: 'center',
+          paddingLeft: indent, paddingRight: 6,
+          borderBottom: '1px solid var(--border)',
+          cursor: 'pointer', userSelect: 'none', overflow: 'hidden',
+        }}
+      >
+        <span style={{ color: rs.fg, opacity: 0.6, flexShrink: 0, marginRight: 4, display: 'flex' }}>
+          {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            fontSize: 10, fontWeight: 500, color: rs.fg,
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>
+            {row.label}
+          </div>
+          <div style={{
+            fontSize: 9, color: 'var(--text-3)',
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            lineHeight: 1.2,
+          }}>
+            {row.subLabel}
+          </div>
+        </div>
+        {onTakeAction && (
+          <button
+            onClick={e => { e.stopPropagation(); onTakeAction(row.sku, row.locId); }}
+            title="Take Action"
+            style={{
+              flexShrink: 0, marginLeft: 4,
+              background: 'rgba(59,130,246,0.12)',
+              border: '1px solid rgba(59,130,246,0.25)',
+              borderRadius: 4,
+              padding: '2px 4px',
+              cursor: 'pointer',
+              display: 'flex', alignItems: 'center',
+              color: 'var(--navy-accent)',
+              lineHeight: 1,
+            }}
+          >
+            <Zap size={11} />
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return <div style={style} />;
 });
 
 // ── Right cell — data value (or edit input) ───────────────────────────────────
@@ -413,13 +382,12 @@ const RightCell = memo(({ columnIndex, rowIndex, style, data }) => {
 
   const rs = ROW_STYLES[row.type] || ROW_STYLES.measure;
 
-  // Determine value and formatting
   let value, fmt, highlight;
   if (row.type === 'measure') {
     value     = getMeasureValue(row, week, tree);
     fmt       = row.measureFmt;
     highlight = getCellHighlight(row.measureKey, value);
-  } else if (row.type === 'line') {
+  } else if (row.type === 'plantline') {
     return (
       <div style={{
         ...style, background: rs.bg,
@@ -433,14 +401,11 @@ const RightCell = memo(({ columnIndex, rowIndex, style, data }) => {
   }
 
   const displayStr = formatVal(value, fmt);
-  const cellKey = `${row.key}|w${week}`;
-
-  const cellBg = highlight || rs.bg;
+  const cellKey    = `${row.key}|w${week}`;
+  const cellBg     = highlight || rs.bg;
   const isEditable = row.type === 'measure' && row.editable && week >= 24;
 
-  const textColor = row.type === 'sku'      ? 'white'
-                  : row.type === 'location' ? 'rgba(255,255,255,0.85)'
-                  : 'var(--text-1)';
+  const textColor = row.type === 'sku' ? 'white' : 'var(--text-1)';
 
   return (
     <div
@@ -452,7 +417,7 @@ const RightCell = memo(({ columnIndex, rowIndex, style, data }) => {
         borderBottom: '1px solid var(--border)',
         borderRight: '1px solid rgba(0,0,0,0.04)',
         fontSize: rs.fs,
-        fontWeight: row.type === 'sku' ? 700 : row.type === 'location' ? 600 : 400,
+        fontWeight: row.type === 'sku' ? 700 : 400,
         color: highlight ? 'var(--text-1)' : textColor,
         cursor: isEditable ? 'cell' : 'default',
         userSelect: 'none',
@@ -465,9 +430,6 @@ const RightCell = memo(({ columnIndex, rowIndex, style, data }) => {
 });
 
 // ── Edit overlay — rendered outside the virtualized grid ─────────────────────
-//
-// We keep the input as an absolute-positioned overlay rather than inside the
-// grid cell. This avoids re-rendering all visible cells when the user types.
 
 function EditOverlay({ editing, onCommit, onCancel }) {
   const inputRef = useRef();
@@ -525,73 +487,62 @@ export default function PlanningGrid({
   width      = 900,
 }) {
   const [expandedSkus,   setExpandedSkus]   = useState(() => new Set());
-  const [expandedLocs,   setExpandedLocs]   = useState(() => new Set());
-  const [expandedPlants, setExpandedPlants] = useState(() => new Set());
+  const [expandedLeaves, setExpandedLeaves] = useState(() => new Set());
 
-  // Editing state: null or { cellKey, row, week, currentValue, value, setValue, rect }
   const [editing, setEditing] = useState(null);
 
   const leftListRef  = useRef();
   const rightGridRef = useRef();
   const hdrScrollRef = useRef();
 
-  const groupDef        = MEASURE_GROUPS[measureGroup] || MEASURE_GROUPS.demand;
-  const measureDefs     = groupDef.measures;
+  const groupDef          = MEASURE_GROUPS[measureGroup] || MEASURE_GROUPS.demand;
+  const measureDefs       = groupDef.measures;
   const primaryMeasureKey = measureDefs[0]?.key ?? null;
-  const accentColor     = groupDef.accentColor;
+  const accentColor       = groupDef.accentColor;
 
   // ── Build tree (memoized) ──────────────────────────────────────────────────
   const tree = useMemo(() => {
     if (!rows.length || !measureDefs.length) return null;
     return buildTree(rows, measureDefs);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, measureGroup]); // measureDefs is derived from measureGroup — intentionally omitted
+  }, [rows, measureGroup]);
 
   // ── Flatten to virtual rows (memoized) ────────────────────────────────────
   const flatRows = useMemo(() => {
     if (!tree) return [];
-    return buildFlatRows(tree, expandedSkus, expandedLocs, expandedPlants, measureDefs);
-  }, [tree, expandedSkus, expandedLocs, expandedPlants, measureDefs]);
+    return buildFlatRows(tree, expandedSkus, expandedLeaves, measureDefs);
+  }, [tree, expandedSkus, expandedLeaves, measureDefs]);
 
   // ── Toggle handlers ────────────────────────────────────────────────────────
   const toggleSku = useCallback(key => {
     setExpandedSkus(prev => { const s = new Set(prev); s.has(key) ? s.delete(key) : s.add(key); return s; });
   }, []);
-  const toggleLoc = useCallback(key => {
-    setExpandedLocs(prev => { const s = new Set(prev); s.has(key) ? s.delete(key) : s.add(key); return s; });
-  }, []);
-  const togglePlant = useCallback(key => {
-    setExpandedPlants(prev => { const s = new Set(prev); s.has(key) ? s.delete(key) : s.add(key); return s; });
+  const toggleLeaf = useCallback(key => {
+    setExpandedLeaves(prev => { const s = new Set(prev); s.has(key) ? s.delete(key) : s.add(key); return s; });
   }, []);
 
   // ── Expand / collapse all ──────────────────────────────────────────────────
   const expandAll = useCallback(() => {
     if (!tree) return;
     setExpandedSkus(new Set(tree.skuOrder));
-    const locs = new Set(), plants = new Set();
+    const leaves = new Set();
     for (const sku of tree.skuOrder) {
-      for (const locId of (tree.locOrder.get(sku) || [])) {
-        const lk = `${sku}|${locId}`;
-        locs.add(lk);
-        for (const plantId of (tree.plantOrder.get(lk) || [])) {
-          plants.add(`${lk}|${plantId}`);
-        }
+      for (const locId of (tree.leafOrder.get(sku) || [])) {
+        leaves.add(`${sku}|${locId}`);
       }
     }
-    setExpandedLocs(locs);
-    setExpandedPlants(plants);
+    setExpandedLeaves(leaves);
   }, [tree]);
 
   const collapseAll = useCallback(() => {
     setExpandedSkus(new Set());
-    setExpandedLocs(new Set());
-    setExpandedPlants(new Set());
+    setExpandedLeaves(new Set());
   }, []);
 
   // ── Scroll sync ────────────────────────────────────────────────────────────
   const handleRightScroll = useCallback(({ scrollLeft, scrollTop }) => {
-    if (leftListRef.current)   leftListRef.current.scrollTo(scrollTop);
-    if (hdrScrollRef.current)  hdrScrollRef.current.scrollLeft = scrollLeft;
+    if (leftListRef.current)  leftListRef.current.scrollTo(scrollTop);
+    if (hdrScrollRef.current) hdrScrollRef.current.scrollLeft = scrollLeft;
   }, []);
 
   // ── Edit flow ──────────────────────────────────────────────────────────────
@@ -601,13 +552,11 @@ export default function PlanningGrid({
     const gridEl = rightGridRef.current._outerRef || rightGridRef.current;
     if (!gridEl || typeof gridEl.getBoundingClientRect !== 'function') return;
 
-    const gridRect = gridEl.getBoundingClientRect();
-    const colIndex = weeks.indexOf(week);
+    const gridRect  = gridEl.getBoundingClientRect();
+    const colIndex  = weeks.indexOf(week);
     const scrollLeft = rightGridRef.current.state?.scrollLeft || 0;
     const scrollTop  = rightGridRef.current.state?.scrollTop  || 0;
-
-    // rowIndex via key lookup (avoids reference equality issues after flatRows rebuild)
-    const rowIndex = flatRows.findIndex(r => r.key === row.key);
+    const rowIndex   = flatRows.findIndex(r => r.key === row.key);
 
     const cellLeft = gridRect.left + (colIndex * COL_W) - scrollLeft;
     const cellTop  = gridRect.top  + (rowIndex * ROW_H) - scrollTop;
@@ -617,10 +566,7 @@ export default function PlanningGrid({
       currentValue,
       value: String(Math.round(currentValue || 0)),
       setValue: (v) => setEditing(prev => prev ? { ...prev, value: v } : prev),
-      rect: {
-        left: cellLeft, top: cellTop,
-        width: COL_W, height: ROW_H,
-      },
+      rect: { left: cellLeft, top: cellTop, width: COL_W, height: ROW_H },
     });
   }, [weeks, flatRows]);
 
@@ -628,37 +574,26 @@ export default function PlanningGrid({
     if (!editing || isNaN(newValue)) { setEditing(null); return; }
     const delta = newValue - (editing.currentValue || 0);
     if (delta !== 0 && onCellEdit) {
-      onCellEdit({
-        row: editing.row,
-        week: editing.week,
-        newValue,
-        delta,
-      });
+      onCellEdit({ row: editing.row, week: editing.week, newValue, delta });
     }
     setEditing(null);
   }, [editing, onCellEdit]);
 
-  const handleEditCancel = useCallback(() => {
-    setEditing(null);
-  }, []);
+  const handleEditCancel = useCallback(() => { setEditing(null); }, []);
 
-  // ── Item data (stable references to prevent unnecessary re-renders) ────────
+  // ── Item data (stable references) ─────────────────────────────────────────
   const leftData = useMemo(() => ({
-    flatRows, expandedSkus, expandedLocs, expandedPlants,
-    toggleSku, toggleLoc, togglePlant, accentColor, onTakeAction,
-  }), [flatRows, expandedSkus, expandedLocs, expandedPlants,
-       toggleSku, toggleLoc, togglePlant, accentColor, onTakeAction]);
+    flatRows, expandedSkus, expandedLeaves,
+    toggleSku, toggleLeaf, accentColor, onTakeAction,
+  }), [flatRows, expandedSkus, expandedLeaves, toggleSku, toggleLeaf, accentColor, onTakeAction]);
 
   const rightData = useMemo(() => ({
     flatRows, weeks, tree, primaryMeasureKey, onBeginEdit: handleBeginEdit,
   }), [flatRows, weeks, tree, primaryMeasureKey, handleBeginEdit]);
 
-  // ── Expose expand/collapse API via imperative handle (prop callbacks) ──────
-  // (parent can call these via the props below)
-
-  const dataH       = height - HDR_H;
-  const rightW      = Math.max(60, width - LEFT_W - 2);
-  const totalColsW  = weeks.length * COL_W;
+  const dataH      = height - HDR_H;
+  const rightW     = Math.max(60, width - LEFT_W - 2);
+  const totalColsW = weeks.length * COL_W;
 
   // ── Loading / empty states ─────────────────────────────────────────────────
 
@@ -681,6 +616,12 @@ export default function PlanningGrid({
     );
   }
 
+  const btnStyle = {
+    fontSize: 10, padding: '3px 8px', borderRadius: 4,
+    background: 'var(--bg)', border: '1px solid var(--border)',
+    cursor: 'pointer', color: 'var(--text-2)',
+  };
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
@@ -692,9 +633,9 @@ export default function PlanningGrid({
         background: 'var(--card)', borderBottom: '1px solid var(--border)',
         fontSize: 11, color: 'var(--text-3)',
       }}>
-        <span>{flatRows.length} rows visible · {weeks.length} months · {rows.length} SKU-locations</span>
+        <span>{flatRows.length} rows visible · {weeks.length} months · {rows.length} SKU-plants</span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-          <button onClick={expandAll} style={btnStyle}>Expand All</button>
+          <button onClick={expandAll}   style={btnStyle}>Expand All</button>
           <button onClick={collapseAll} style={btnStyle}>Collapse All</button>
         </div>
       </div>
@@ -702,7 +643,7 @@ export default function PlanningGrid({
       {/* Grid wrapper */}
       <div style={{
         display: 'flex', flexDirection: 'column',
-        height: height - 33, // subtract toolbar height
+        height: height - 33,
         background: 'var(--card)',
         border: '1px solid var(--border)',
         borderRadius: 'var(--radius-md)',
@@ -733,7 +674,7 @@ export default function PlanningGrid({
             }}>
               {groupDef.label.toUpperCase()}
             </span>
-            SKU / Location / Line
+            SKU / Plant / Line
           </div>
 
           {/* Week header strip — horizontally synced with right grid */}
@@ -799,7 +740,7 @@ export default function PlanningGrid({
         </div>
       </div>
 
-      {/* Edit overlay — positioned outside grid to avoid re-render cascade */}
+      {/* Edit overlay */}
       {editing && (
         <EditOverlay
           editing={editing}
@@ -810,9 +751,3 @@ export default function PlanningGrid({
     </>
   );
 }
-
-const btnStyle = {
-  background: 'var(--blue-bg)', border: '1px solid var(--blue)',
-  color: 'var(--blue)', borderRadius: 'var(--radius-sm)',
-  padding: '2px 10px', fontSize: 10, fontWeight: 600, cursor: 'pointer',
-};

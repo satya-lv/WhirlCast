@@ -238,7 +238,7 @@ const supplyLockedText = (label) => (
   </span>
 );
 
-function FilterBar({ options, filters, onChange, showHistory, onToggleHistory, lockedField, lockedLabel }) {
+function FilterBar({ options, filters, onChange, showHistory, onToggleHistory, lockedField, lockedLabel, hideRegion }) {
   if (!options) {
     return (
       <div style={s.filterBar}>
@@ -258,15 +258,16 @@ function FilterBar({ options, filters, onChange, showHistory, onToggleHistory, l
           </FSelect>
         )
       }
-      {lockedField === 'region' || lockedField === 'locationId'
-        ? supplyLockedText(lockedLabel)
-        : (
-          <FSelect label="Region" value={filters.region} onChange={v => set('region', v)}>
-            <option value="">All Regions</option>
-            {options.regions.map(r => <option key={r} value={r}>{r}</option>)}
-          </FSelect>
-        )
-      }
+      {!hideRegion && (
+        lockedField === 'region' || lockedField === 'locationId'
+          ? supplyLockedText(lockedLabel)
+          : (
+            <FSelect label="Region" value={filters.region} onChange={v => set('region', v)}>
+              <option value="">All Regions</option>
+              {options.regions.map(r => <option key={r} value={r}>{r}</option>)}
+            </FSelect>
+          )
+      )}
       <FSelect label="Plant" value={filters.plant} onChange={v => set('plant', v)}>
         <option value="">All Plants</option>
         {options.plants.map(p => <option key={p.plant_id} value={p.plant_id}>{p.name}</option>)}
@@ -998,6 +999,7 @@ export default function SupplyPlanning() {
         showHistory={showHistory} onToggleHistory={handleToggleHistory}
         lockedField={lockedFilter?.field}
         lockedLabel={lockedFilter?.label}
+        hideRegion={activeView === 'constraints' || activeView === 'recommendations'}
       />
 
       {/* §3.2 KPI strip */}
@@ -1164,7 +1166,7 @@ function CapacityView({ rows = [], weekRange }) {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
             <tr style={{ background: 'var(--bg)' }}>
-              {['Plant', 'Line', 'Category', 'Hrs/Mo (cap)', 'Hrs Required', 'Utilization', 'Overload Hrs', 'Shortage Units', 'Status'].map(h => (
+              {['Plant', 'Line', 'Category', 'Cap (hrs/wk)', 'Hrs Required (total, M24–M52)', 'Utilization', 'Overload Hrs', 'Shortage Units', 'Status'].map(h => (
                 <th key={h} style={{ padding: '6px 10px', textAlign: 'left', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.4px', color: 'var(--text-3)', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>{h}</th>
               ))}
             </tr>

@@ -102,9 +102,6 @@ export default function PersonaLogin() {
 
       </form>
 
-      <p style={{ color: 'rgba(255,255,255,0.2)', fontSize: 11, marginTop: 32 }}>
-        Powered by DecisionPoint Analytics
-      </p>
     </div>
   );
 }

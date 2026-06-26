@@ -47,7 +47,7 @@ export default function PersonaLanding() {
   useEffect(() => { document.title = 'WhirlCast — Select Module'; }, []);
   const navigate = useNavigate();
   const { login } = useAuth();
-  const { persona } = usePersona();
+  const { persona, setPersona } = usePersona();
   const [hovered, setHovered] = useState(null);
   const [execExpanded, setExecExpanded] = useState(false);
 
@@ -65,9 +65,14 @@ export default function PersonaLanding() {
       return;
     }
     if (mod.id === 'admin') {
-      // Auth login here so ProtectedRoute passes for admin role
       login({ role: 'admin', name: persona.displayName });
       navigate('/admin');
+      return;
+    }
+    if (mod.id === 'supply') {
+      login({ role: 'demand_planning', name: persona.displayName });
+      setPersona({ role: 'planner', module: 'supply' });
+      navigate('/supply');
       return;
     }
     navigate(`/role-select?module=${mod.id}`);
@@ -147,9 +152,6 @@ export default function PersonaLanding() {
         ))}
       </div>
 
-      <p style={{ color: 'rgba(255,255,255,0.2)', fontSize: 11, marginTop: 40 }}>
-        Powered by DecisionPoint Analytics
-      </p>
     </div>
   );
 }

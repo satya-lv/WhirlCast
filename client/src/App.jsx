@@ -108,16 +108,6 @@ function AppLayout() {
 
           <AppRoutes />
 
-          {isAuthenticated && (
-            <footer style={{
-              textAlign: 'center',
-              padding: '12px',
-              fontSize: 11,
-              color: 'var(--text-3)',
-            }}>
-              Powered by DecisionPoint Analytics
-            </footer>
-          )}
         </main>
       </div>
     </div>
