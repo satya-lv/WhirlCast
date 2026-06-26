@@ -645,13 +645,20 @@ router.post('/actions', (req, res) => {
       WHERE sku=? AND location_id=? AND week_number=? AND scenario_id=? AND year=2026 LIMIT 1`
     ).get(s, l, w, scenarioId);
 
+    // Helper: resolve effective demand (consensus first, raw forecast fallback) — same source as KPI/grid queries
+    const getEffectiveDemand = (s, l, w) => {
+      const dwd = db.prepare(`SELECT final_consensus FROM demand_weekly_data WHERE sku=? AND location_id=? AND week_number=? LIMIT 1`).get(s, l, w);
+      return (dwd && dwd.final_consensus) ? dwd.final_consensus : null;
+    };
+
     // Helper: recompute derived fields after production change and UPDATE the row
     const recomputeAndSave = (row, newProd) => {
       const hpu = db.prepare(`SELECT hours_per_unit FROM sku_planning_params WHERE sku=?`).get(row.sku)?.hours_per_unit ?? 0;
+      const effDemand = getEffectiveDemand(row.sku, row.location_id, row.week_number) ?? row.forecast_demand;
       newProd = Math.max(0, newProd);
-      const endInv   = Math.round(Math.max(0, row.beginning_inventory + newProd - row.forecast_demand) * 10) / 10;
-      const shortage = Math.round(Math.max(0, row.forecast_demand - row.beginning_inventory - newProd) * 10) / 10;
-      const gap      = Math.round(Math.max(0, row.forecast_demand - newProd) * 10) / 10;
+      const endInv   = Math.round(Math.max(0, row.beginning_inventory + newProd - effDemand) * 10) / 10;
+      const shortage = Math.round(Math.max(0, effDemand - row.beginning_inventory - newProd) * 10) / 10;
+      const gap      = Math.round(Math.max(0, effDemand - newProd) * 10) / 10;
       const capReq   = Math.round(newProd * hpu * 10) / 10;
       db.prepare(`
         UPDATE planning_orders SET
@@ -660,6 +667,30 @@ router.post('/actions', (req, res) => {
         WHERE order_id=?`
       ).run(newProd, endInv, shortage, gap, capReq, row.order_id);
       return { ...row, planned_production: newProd, ending_inventory: endInv, shortage_qty: shortage, supply_gap: gap, capacity_required: capReq };
+    };
+
+    // Helper: propagate changed ending_inventory forward through all subsequent periods for a SKU/location
+    const cascadeInventoryForward = (s, l, fromWeek, prevEndingInv) => {
+      const rows = db.prepare(`
+        SELECT po.* FROM planning_orders po
+        WHERE po.sku=? AND po.location_id=? AND po.scenario_id=? AND po.year=2026
+          AND po.week_number > ?
+        ORDER BY po.week_number ASC`
+      ).all(s, l, scenarioId, fromWeek);
+
+      let prevInv = prevEndingInv;
+      for (const r of rows) {
+        const newBegInv  = Math.max(0, prevInv);
+        const effDemand  = getEffectiveDemand(r.sku, r.location_id, r.week_number) ?? r.forecast_demand;
+        const newEndInv  = Math.round(Math.max(0, newBegInv + r.planned_production - effDemand) * 10) / 10;
+        const newShortage = Math.round(Math.max(0, effDemand - newBegInv - r.planned_production) * 10) / 10;
+        const newGap     = Math.round(Math.max(0, effDemand - r.planned_production) * 10) / 10;
+        db.prepare(`
+          UPDATE planning_orders SET beginning_inventory=?, ending_inventory=?, shortage_qty=?, supply_gap=?
+          WHERE order_id=?`
+        ).run(newBegInv, newEndInv, newShortage, newGap, r.order_id);
+        prevInv = newEndInv;
+      }
     };
 
     let result = {};
@@ -672,7 +703,9 @@ router.post('/actions', (req, res) => {
         const newProd = actionType === 'increase_production'
           ? row.planned_production + delta
           : row.planned_production - delta;
-        result = { updatedRows: [recomputeAndSave(row, newProd)] };
+        const updated = recomputeAndSave(row, newProd);
+        cascadeInventoryForward(sku, locId, week, updated.ending_inventory);
+        result = { updatedRows: [updated] };
       }
 
       else if (actionType === 'pull_ahead' || actionType === 'push_out') {
@@ -686,11 +719,15 @@ router.post('/actions', (req, res) => {
         const dstRow = fetchRow(sku, locId, dstWeek);
         if (!srcRow || !dstRow) throw new Error('Source or destination planning order not found');
         if (qty > srcRow.planned_production)
-          throw new Error(`Cannot move ${qty} units — only ${srcRow.planned_production} planned in source week`);
+          throw new Error(`Cannot move ${qty} units — only ${srcRow.planned_production} planned in source month`);
 
         const srcUpdated = recomputeAndSave(srcRow, srcRow.planned_production - qty);
         const dstUpdated = recomputeAndSave(dstRow, dstRow.planned_production + qty);
-        result = { updatedRows: [srcUpdated, dstUpdated], note: 'Inventory continuity for intermediate weeks not auto-updated; re-plan to propagate.' };
+        // Cascade from the earlier of the two changed periods so downstream beginning_inventory stays consistent
+        const earlierWeek    = Math.min(srcWeek, dstWeek);
+        const earlierUpdated = earlierWeek === dstWeek ? dstUpdated : srcUpdated;
+        cascadeInventoryForward(sku, locId, earlierWeek, earlierUpdated.ending_inventory);
+        result = { updatedRows: [srcUpdated, dstUpdated] };
       }
 
       else if (actionType === 'add_overtime') {
@@ -698,7 +735,7 @@ router.post('/actions', (req, res) => {
         if (!plantId || !lineId || !extraHoursPerWeek)
           throw new Error('add_overtime requires plantId, lineId, extraHoursPerWeek');
 
-        // Find all rows for this plant+line+week, increase capacity_available
+        // Find all rows sharing this plant+line+week
         const affectedRows = db.prepare(`
           SELECT po.*, spp.hours_per_unit
           FROM planning_orders po
@@ -707,12 +744,22 @@ router.post('/actions', (req, res) => {
         ).all(parseInt(plantId), parseInt(lineId), week, scenarioId);
 
         const updated = [];
-        for (const row of affectedRows) {
-          const extraUnits   = Math.round(extraHoursPerWeek / row.hours_per_unit * 10) / 10;
-          const newCapAvail  = row.capacity_available + extraUnits;
-          const newProd      = Math.min(newCapAvail, row.planned_production + extraUnits);
-          db.prepare(`UPDATE planning_orders SET capacity_available=? WHERE order_id=?`).run(newCapAvail, row.order_id);
-          updated.push(recomputeAndSave(row, newProd));
+        if (affectedRows.length > 0) {
+          // Distribute the overtime hours proportionally by each row's share of total capacity_required,
+          // so the line receives exactly extraHoursPerWeek of additional capacity in aggregate.
+          // Fall back to equal split when total_cap_req = 0 (all rows idle).
+          const totalCapReq = affectedRows.reduce((s, r) => s + (r.capacity_required || 0), 0);
+          for (const row of affectedRows) {
+            const share       = totalCapReq > 0 ? (row.capacity_required || 0) / totalCapReq : 1 / affectedRows.length;
+            const rowExtraHrs = extraHoursPerWeek * share;
+            const extraUnits  = Math.round(rowExtraHrs / row.hours_per_unit * 10) / 10;
+            const newCapAvail = row.capacity_available + extraUnits;
+            const newProd     = Math.min(newCapAvail, row.planned_production + extraUnits);
+            db.prepare(`UPDATE planning_orders SET capacity_available=? WHERE order_id=?`).run(newCapAvail, row.order_id);
+            const updatedRow  = recomputeAndSave(row, newProd);
+            cascadeInventoryForward(row.sku, row.location_id, row.week_number, updatedRow.ending_inventory);
+            updated.push(updatedRow);
+          }
         }
         result = { updatedRows: updated, extraHoursPerWeek };
       }
@@ -849,9 +896,9 @@ router.get('/recommendations', (req, res) => {
         id:       `cap-${ci.plant_id}-${ci.production_line_id}-w${ci.week_number}`,
         priority: parseFloat(overloadPct) > 50 ? 'HIGH' : 'MEDIUM',
         type:     'CAPACITY',
-        issue:    `${ci.line_name} at ${ci.plant_name} overloaded by ${overloadPct}% in week ${ci.week_number}`,
+        issue:    `${ci.line_name} at ${ci.plant_name} overloaded by ${overloadPct}% in month ${ci.week_number}`,
         recommendedActions: [
-          `Add Saturday overtime shift on ${ci.line_name} (week ${ci.week_number}) — +${extraUnits} units`,
+          `Add Saturday overtime shift on ${ci.line_name} (month ${ci.week_number}) — +${extraUnits} units`,
           `Shift ${Math.round(overloadHrs / lineHpu)} units of ${ci.line_category} production to alternate plant`,
         ],
         impact: {
@@ -905,9 +952,9 @@ router.get('/recommendations', (req, res) => {
         id:       `mat-${mi.sku}-${mi.location_id}-w${mi.week_number}`,
         priority: mi.material_availability < 7 ? 'HIGH' : 'MEDIUM',
         type:     'MATERIAL',
-        issue:    `${mi.sku} at ${mi.location_name} week ${mi.week_number}: ${tightComp.comp_name} coverage ${mi.material_availability.toFixed(1)} days`,
+        issue:    `${mi.sku} at ${mi.location_name} month ${mi.week_number}: ${tightComp.comp_name} coverage ${mi.material_availability.toFixed(1)} days`,
         recommendedActions: [
-          `Expedite ${tightComp.comp_name} PO from ${tightComp.supplier_name} — request ${expediteQty} units 2 weeks early`,
+          `Expedite ${tightComp.comp_name} PO from ${tightComp.supplier_name} — request ${expediteQty} units 2 months early`,
           `Reduce planned production of ${mi.sku} by ${Math.round(weeklyDraw)} to extend coverage`,
         ],
         impact: {
@@ -966,9 +1013,9 @@ router.get('/recommendations', (req, res) => {
         id:       `inv-${ii.sku}-${ii.location_id}-w${ii.week_number}`,
         priority: ii.revenue_at_risk > 500000 ? 'HIGH' : 'MEDIUM',
         type:     'INVENTORY',
-        issue:    `${ii.sku} shortage of ${ii.shortage_qty.toFixed(0)} units at ${ii.location_name} week ${ii.week_number} — ₹${(ii.revenue_at_risk/100000).toFixed(1)}L at risk`,
+        issue:    `${ii.sku} shortage of ${ii.shortage_qty.toFixed(0)} units at ${ii.location_name} month ${ii.week_number} — ₹${(ii.revenue_at_risk/100000).toFixed(1)}L at risk`,
         recommendedActions: [
-          `Pull ahead ${pullableQty} units from week ${futureWeek} to week ${ii.week_number} (${spareCapHrs.toFixed(1)} spare capacity hrs available)`,
+          `Pull ahead ${pullableQty} units from month ${futureWeek} to month ${ii.week_number} (${spareCapHrs.toFixed(1)} spare capacity hrs available)`,
           `Prioritize Tier-1 customer allocation for available ${Math.round(ii.planned_production + ii.beginning_inventory)} units`,
         ],
         impact: {
@@ -1326,7 +1373,7 @@ router.post('/whatif/simulate', (req, res) => {
           improved = afterShortage < beforeShortage;
           if (!improved) {
             note = weeksMatConstr > 0
-              ? `Material-constrained (${weeksMatConstr} wk${weeksMatConstr > 1 ? 's' : ''}) — overtime cannot address component shortage`
+              ? `Material-constrained (${weeksMatConstr} mo${weeksMatConstr > 1 ? 's' : ''}) — overtime cannot address component shortage`
               : `Not at capacity limit — shortage is not driven by line capacity`;
           }
         }

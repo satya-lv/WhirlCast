@@ -1700,6 +1700,11 @@ function RecCard({ rec, scenarioId, onApply }) {
               {applyState === 'done' ? 'Applied ✓' : applyState === 'loading' ? 'Applying…' : 'Apply Action →'}
             </button>
           )}
+          {rec.type === 'MATERIAL' && (
+            <div style={{ marginTop: 8, fontSize: 11, color: 'var(--amber)', lineHeight: 1.45 }}>
+              Improves material coverage days. Service Level and shortage qty do not change this period — those require a production or inventory action.
+            </div>
+          )}
         </div>
 
         <div>
