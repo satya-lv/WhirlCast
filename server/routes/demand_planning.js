@@ -1089,4 +1089,237 @@ router.post('/model/finalize', (req, res) => {
   }
 });
 
+// ── Disaggregation helpers ────────────────────────────────────────────────────
+// 7 planning month blocks, each 4 weeks wide, rolling from EDITABLE_FROM_WEEK.
+// +1M = weeks 24-27, +2M = weeks 28-31, ..., +6M = weeks 44-47, +7M = weeks 48-52.
+const DISAGG_NUM_MONTHS = 7;
+const DISAGG_MONTH_BLOCKS = (() => {
+  const blocks = {};
+  for (let m = 1; m <= DISAGG_NUM_MONTHS; m++) {
+    const blockStart = EDITABLE_FROM_WEEK + (m - 1) * 4;
+    blocks[m] = { start: blockStart, end: m === DISAGG_NUM_MONTHS ? 52 : blockStart + 3 };
+  }
+  return blocks;
+})();
+
+// Distribute `totalRounded` integer units among items proportional to item.raw.
+// Uses the largest-remainder method so the sum equals totalRounded exactly.
+function largestRemainder(items, totalRounded) {
+  if (!items.length || totalRounded === 0) {
+    return Object.fromEntries(items.map(i => [i.key, 0]));
+  }
+  const rawSum = items.reduce((s, i) => s + i.raw, 0);
+  const share  = rawSum === 0
+    ? items.map(i => ({ ...i, exact: totalRounded / items.length }))
+    : items.map(i => ({ ...i, exact: i.raw / rawSum * totalRounded }));
+  const floored  = share.map(i => ({ ...i, floor: Math.trunc(i.exact), frac: i.exact - Math.trunc(i.exact) }));
+  let remainder  = totalRounded - floored.reduce((s, i) => s + i.floor, 0);
+  floored.sort((a, b) => b.frac - a.frac);
+  for (let i = 0; i < Math.abs(remainder); i++) floored[i].floor += remainder > 0 ? 1 : -1;
+  const out = {};
+  for (const e of floored) out[e.key] = e.floor;
+  return out;
+}
+
+// Core computation: returns { totalEntered, totalAllocated, rows, targetMonths }.
+// rows[i] = { sku, locationId, locationName, weekAmounts, monthlyAmounts, currentMonthlyAdj }
+function computeDisaggregation(db, { category, totalAdjustment, targetMonths, role = 'planner' }) {
+  const total = Math.round(Number(totalAdjustment));
+  if (!Number.isFinite(total) || total === 0) throw new Error('totalAdjustment must be a non-zero integer');
+  if (!Array.isArray(targetMonths) || targetMonths.length === 0) throw new Error('targetMonths must be a non-empty array');
+
+  // Build target-weeks list from rolling 4-week planning month blocks
+  const tgtWeeks = [];
+  for (const m of targetMonths) {
+    const block = DISAGG_MONTH_BLOCKS[m];
+    if (!block) throw new Error(`Invalid planning month: ${m} (must be 1–${DISAGG_NUM_MONTHS})`);
+    for (let w = block.start; w <= block.end; w++) tgtWeeks.push(w);
+  }
+  if (!tgtWeeks.length) throw new Error('No target weeks found for selected months');
+
+  // ── Stage 1: category → SKU (by historical actual_sales, weeks 1–23) ──────
+  const skuHist = db.prepare(`
+    SELECT sku, COALESCE(SUM(actual_sales), 0) AS hist
+    FROM demand_weekly_data
+    WHERE sku IN (SELECT sku FROM product_master WHERE category = ?)
+      AND week_number BETWEEN 1 AND ${EDITABLE_FROM_WEEK - 1}
+      AND year = ?
+    GROUP BY sku
+    ORDER BY sku
+  `).all(category, DEMAND_YEAR);
+
+  if (!skuHist.length) throw new Error(`No SKUs found for category "${category}"`);
+
+  const stage1 = largestRemainder(
+    skuHist.map(r => ({ key: r.sku, raw: r.hist })),
+    total
+  );
+
+  // ── Stage 2: SKU → location (by SKU-location historical actual_sales) ─────
+  const locHist = db.prepare(`
+    SELECT dwd.sku, dwd.location_id, l.name AS location_name,
+           COALESCE(SUM(dwd.actual_sales), 0) AS hist
+    FROM demand_weekly_data dwd
+    JOIN locations l ON dwd.location_id = l.location_id
+    WHERE dwd.sku IN (SELECT sku FROM product_master WHERE category = ?)
+      AND dwd.week_number BETWEEN 1 AND ${EDITABLE_FROM_WEEK - 1}
+      AND dwd.year = ?
+    GROUP BY dwd.sku, dwd.location_id
+    ORDER BY dwd.sku, l.name
+  `).all(category, DEMAND_YEAR);
+
+  const locHistBySku = {};
+  const locNames     = {};
+  for (const r of locHist) {
+    if (!locHistBySku[r.sku]) locHistBySku[r.sku] = [];
+    locHistBySku[r.sku].push({ key: String(r.location_id), raw: r.hist });
+    locNames[r.location_id] = r.location_name;
+  }
+
+  const stage2 = {};   // stage2[sku][locIdStr] = integer units
+  for (const [sku, skuAmount] of Object.entries(stage1)) {
+    const items = (locHistBySku[sku] || []);
+    stage2[sku] = items.length ? largestRemainder(items, skuAmount) : {};
+  }
+
+  // ── Stage 3: SKU-location → weeks (by system_forecast for target weeks) ───
+  const wkIn = tgtWeeks.map(() => '?').join(',');
+  const sfRows = db.prepare(`
+    SELECT sku, location_id, week_number, COALESCE(system_forecast, 0) AS sf
+    FROM demand_weekly_data
+    WHERE sku IN (SELECT sku FROM product_master WHERE category = ?)
+      AND week_number IN (${wkIn})
+      AND year = ?
+  `).all(category, ...tgtWeeks, DEMAND_YEAR);
+
+  const sfBySL = {};   // sfBySL[`sku|locId`][week] = sf value
+  for (const r of sfRows) {
+    const k = `${r.sku}|${r.location_id}`;
+    if (!sfBySL[k]) sfBySL[k] = {};
+    sfBySL[k][r.week_number] = r.sf;
+  }
+
+  // Current adjustment for target weeks — column matches what will be written
+  const adjCol = role === 'category_manager' ? 'category_adjustment' : 'planner_adjustment';
+  const curRows = db.prepare(`
+    SELECT sku, location_id, week_number, COALESCE(${adjCol}, 0) AS pa
+    FROM demand_weekly_data
+    WHERE sku IN (SELECT sku FROM product_master WHERE category = ?)
+      AND week_number IN (${wkIn})
+      AND year = ?
+  `).all(category, ...tgtWeeks, DEMAND_YEAR);
+
+  const curBySL = {};
+  for (const r of curRows) {
+    const k = `${r.sku}|${r.location_id}`;
+    if (!curBySL[k]) curBySL[k] = {};
+    curBySL[k][r.week_number] = r.pa;
+  }
+
+  const rows = [];
+  for (const [sku, locMap] of Object.entries(stage2)) {
+    for (const [locIdStr, locAmount] of Object.entries(locMap)) {
+      const locId = parseInt(locIdStr, 10);
+      const slKey = `${sku}|${locId}`;
+      const sfMap = sfBySL[slKey] || {};
+
+      const sfItems = tgtWeeks.map(w => ({ key: String(w), raw: sfMap[w] || 0 }));
+      const weekAmounts = largestRemainder(sfItems, locAmount);
+
+      // Aggregate weeks → months for user-facing display
+      const monthlyAmounts = {};
+      const currentMonthlyAdj = {};
+      for (const m of targetMonths) {
+        const { start, end } = DISAGG_MONTH_BLOCKS[m];
+        let splitSum = 0, curSum = 0;
+        for (let w = start; w <= end; w++) {
+          splitSum += weekAmounts[String(w)] || 0;
+          curSum   += (curBySL[slKey] || {})[w] || 0;
+        }
+        monthlyAmounts[m]    = splitSum;
+        currentMonthlyAdj[m] = curSum;
+      }
+
+      rows.push({ sku, locationId: locId, locationName: locNames[locId] || `Loc${locId}`,
+        weekAmounts, monthlyAmounts, currentMonthlyAdj });
+    }
+  }
+
+  const totalAllocated = rows.reduce(
+    (s, r) => s + Object.values(r.monthlyAmounts).reduce((ss, v) => ss + v, 0), 0
+  );
+
+  return { totalEntered: total, totalAllocated, rows, targetMonths, tgtWeeks };
+}
+
+// ── POST /api/demand-planning/disaggregate/preview ───────────────────────────
+// Read-only: compute the 3-stage split and return the preview table.
+// Body: { category, totalAdjustment, targetMonths }
+
+router.post('/disaggregate/preview', (req, res) => {
+  try {
+    const { category, totalAdjustment, targetMonths, role } = req.body;
+    if (!category) return res.status(400).json({ error: 'category is required' });
+
+    const db     = getDb();
+    const result = computeDisaggregation(db, { category, totalAdjustment, targetMonths, role });
+    db.close();
+
+    // Strip weekAmounts from the response — internal detail, not needed by the UI
+    const clientRows = result.rows.map(({ weekAmounts: _w, ...rest }) => rest);
+    res.json({ ...result, rows: clientRows });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ── POST /api/demand-planning/disaggregate/apply ─────────────────────────────
+// Recomputes the same split and writes additively to planner_adjustment.
+// final_consensus is recalculated for every touched row.
+// Body: same as preview.
+
+router.post('/disaggregate/apply', (req, res) => {
+  try {
+    const { category, totalAdjustment, targetMonths, role } = req.body;
+    if (!category) return res.status(400).json({ error: 'category is required' });
+
+    const db     = getDb();
+    const result = computeDisaggregation(db, { category, totalAdjustment, targetMonths, role });
+
+    const isCatMgr = role === 'category_manager';
+    const stmt = isCatMgr
+      ? db.prepare(`
+          UPDATE demand_weekly_data
+          SET category_adjustment = category_adjustment + ?,
+              final_consensus = system_forecast + planner_adjustment + branch_adjustment + category_adjustment + ?
+          WHERE sku = ? AND location_id = ? AND week_number = ? AND year = ?
+        `)
+      : db.prepare(`
+          UPDATE demand_weekly_data
+          SET planner_adjustment = planner_adjustment + ?,
+              final_consensus = system_forecast + planner_adjustment + ? + branch_adjustment + category_adjustment
+          WHERE sku = ? AND location_id = ? AND week_number = ? AND year = ?
+        `);
+
+    let rowsAffected = 0;
+    const applyAll = db.transaction(() => {
+      for (const row of result.rows) {
+        for (const [wkStr, amount] of Object.entries(row.weekAmounts)) {
+          if (amount === 0) continue;
+          const r = stmt.run(amount, amount, row.sku, row.locationId, parseInt(wkStr, 10), DEMAND_YEAR);
+          if (r.changes === 0) throw new Error(`Row not found: ${row.sku} / loc${row.locationId} / week${wkStr}`);
+          rowsAffected++;
+        }
+      }
+    });
+
+    applyAll();
+    db.close();
+
+    res.json({ success: true, totalWritten: result.totalAllocated, rowsAffected });
+  } catch (err) {
+    res.status(err.message.includes('not found') ? 404 : 400).json({ error: err.message });
+  }
+});
+
 module.exports = router;

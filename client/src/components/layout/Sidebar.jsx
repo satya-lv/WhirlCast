@@ -6,7 +6,7 @@ import {
   LayoutDashboard, BarChart2, GitBranch, Zap, Plus,
   Layers, TrendingUp, FlaskConical, Activity, Package, ArrowLeftRight,
   Users, AlertTriangle, Truck,
-  Shield, CheckSquare,
+  Shield, CheckSquare, Sliders,
   FileBarChart, Settings, LogOut, Sun, Moon, RotateCcw, UserX,
 } from 'lucide-react';
 
@@ -63,12 +63,13 @@ const UTILITY_NAV = [
 
 const MODULE_TABS = {
   demand: [
-    { id: 'grid',       label: 'Forecast Grid',   icon: BarChart2     },
-    { id: 'patterns',   label: 'Patterns',         icon: TrendingUp    },
-    { id: 'whatif',     label: 'What-If',          icon: FlaskConical  },
-    { id: 'exceptions', label: 'Exceptions',       icon: AlertTriangle },
-    { id: 'npi',        label: 'NPI Forecasting',  icon: Plus          },
-    { id: 'sensing',    label: 'Demand Sensing',   icon: Zap           },
+    { id: 'grid',         label: 'Forecast Grid',   icon: BarChart2     },
+    { id: 'patterns',     label: 'Patterns',         icon: TrendingUp    },
+    { id: 'whatif',       label: 'What-If',          icon: FlaskConical  },
+    { id: 'disaggregate', label: 'Disaggregate',     icon: Sliders,      hiddenForRoles: ['branch_manager'] },
+    { id: 'exceptions',   label: 'Exceptions',       icon: AlertTriangle },
+    { id: 'npi',          label: 'NPI Forecasting',  icon: Plus          },
+    { id: 'sensing',      label: 'Demand Sensing',   icon: Zap           },
   ],
   supply: [
     { id: 'grid',            label: 'Planning Grid',   icon: Layers       },
@@ -303,7 +304,9 @@ export default function Sidebar() {
             }}>
               {MODULE_TITLE[moduleKey]}
             </div>
-            {MODULE_TABS[moduleKey].map(tab => {
+            {MODULE_TABS[moduleKey]
+              .filter(tab => !tab.hiddenForRoles || !tab.hiddenForRoles.includes(persona?.role))
+              .map(tab => {
               const isActive = activeView === tab.id;
               const Icon = tab.icon;
               return (

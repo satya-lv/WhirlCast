@@ -18,6 +18,7 @@ import DemandGrid from '../components/demand/DemandGrid';
 import PatternsTab from '../components/demand/PatternsTab';
 import ExceptionsTab from '../components/demand/ExceptionsTab';
 import WhatIfTab from '../components/demand/WhatIfTab';
+import DisaggregateTab from '../components/demand/DisaggregateTab';
 import NPITab from '../components/demand/NPITab';
 import DemandSensing from './DemandSensing';
 
@@ -924,6 +925,19 @@ export default function DemandPlanning() {
         flexDirection: 'column',
       }}>
         <WhatIfTab
+          filterOptions={filterOptions}
+          lockedFilter={lockedFilter}
+          onApplyComplete={() => { refreshKPIs(); markGridDirty(); }}
+        />
+      </div>
+
+      {/* Disaggregate tab — always mounted; display:none preserves form + preview state */}
+      <div style={{
+        flex: 1, minHeight: 0, overflowY: 'auto',
+        display: activeView === 'disaggregate' ? 'flex' : 'none',
+        flexDirection: 'column',
+      }}>
+        <DisaggregateTab
           filterOptions={filterOptions}
           lockedFilter={lockedFilter}
           onApplyComplete={() => { refreshKPIs(); markGridDirty(); }}
