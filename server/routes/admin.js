@@ -216,4 +216,35 @@ router.post('/users/update', (req, res) => {
   }
 });
 
+// ── POST /api/admin/reset-all ─────────────────────────────────────────────────
+// Full reset: reseeds Supply Planning + clears all Demand Planning adjustments.
+const seedSupply = require('../db/seed_supply');
+const { seedDemand } = require('../db/seed_demand');
+
+router.post('/reset-all', (req, res) => {
+  try {
+    // 1. Full supply reseed (planning_orders, scenario_supply_plans, all supply tables)
+    seedSupply(true);
+
+    // 2. Clear all demand adjustments; final_consensus reverts to system_forecast
+    const db = getDb();
+    db.prepare(`
+      UPDATE demand_weekly_data
+      SET planner_adjustment  = 0,
+          branch_adjustment   = 0,
+          category_adjustment = 0,
+          final_consensus     = system_forecast
+    `).run();
+    db.close();
+
+    // 3. Reseed demand (actual_sales, system_forecast, exception log, branch overrides)
+    seedDemand(true);
+
+    res.json({ success: true, message: 'All data reset to original seeded values' });
+  } catch (err) {
+    console.error('reset-all error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

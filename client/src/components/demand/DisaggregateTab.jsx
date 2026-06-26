@@ -19,17 +19,10 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import { usePersona } from '../../context/PersonaContext';
 
-// 7 rolling 4-week planning months, matching the server's DISAGG_MONTH_BLOCKS.
-// +1M = weeks 24-27, +2M = weeks 28-31, ..., +7M = weeks 48-52.
-const PLANNING_MONTHS = [
-  { num: 1, label: '+1M' },
-  { num: 2, label: '+2M' },
-  { num: 3, label: '+3M' },
-  { num: 4, label: '+4M' },
-  { num: 5, label: '+5M' },
-  { num: 6, label: '+6M' },
-  { num: 7, label: '+7M' },
-];
+// 1 chip = 1 planning period = 1 week_number, matching the grid/WhatIf +NM convention.
+// +NM chip sends offset N; server maps to week EDITABLE_FROM_WEEK + N (24 + N).
+// +1M = wk 25, +2M = wk 26, …, +12M = wk 36.
+const PLANNING_MONTHS = Array.from({ length: 12 }, (_, i) => ({ num: i + 1, label: `+${i + 1}M` }));
 
 function fmtSplit(n) {
   if (n === 0) return '0';
@@ -254,7 +247,7 @@ export default function DisaggregateTab({ filterOptions, lockedFilter, onApplyCo
         {/* Row 2: Month chips */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <span style={labelStyle}>Target Months</span>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 2 }}>
             {PLANNING_MONTHS.map(m => {
               const sel = targetMonths.has(m.num);
               return (
@@ -275,7 +268,7 @@ export default function DisaggregateTab({ filterOptions, lockedFilter, onApplyCo
             })}
           </div>
           <span style={{ fontSize: 10, color: 'var(--text-3)' }}>
-            Select one or more months · Only the current and future planning horizon (Jun–Dec) is editable
+            Select one or more planning periods · +1M = next period, +2M = two ahead, etc. · Matches grid column labels exactly
           </span>
         </div>
       </div>

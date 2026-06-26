@@ -206,10 +206,10 @@ export default function Sidebar() {
     setResetting(true);
     setShowResetModal(false);
     try {
-      const res = await fetch('/api/demo/reset', { method: 'POST' });
+      const res = await fetch('/api/admin/reset-all', { method: 'POST' });
       const data = await res.json();
       if (data.success) {
-        alert(data.message || 'Demo reset to default state');
+        alert(data.message || 'All data reset to original seeded values');
         setTimeout(() => window.location.reload(), 1500);
       }
     } catch { /* ignore */ }
@@ -414,7 +414,7 @@ export default function Sidebar() {
               {dark ? <Sun size={12} /> : <Moon size={12} />}
             </button>
             <button onClick={() => setShowResetModal(true)} disabled={resetting}
-              title="Reset demo data"
+              title="Reset all data"
               style={{
                 flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
                 background: 'rgba(255,255,255,0.07)', border: '0.5px solid rgba(255,255,255,0.12)',
@@ -465,10 +465,10 @@ export default function Sidebar() {
             boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
           }} onClick={e => e.stopPropagation()}>
             <div style={{ fontSize: 15, fontWeight: 700, color: 'white', marginBottom: 10 }}>
-              Reset demo data?
+              Reset all data?
             </div>
             <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.55)', lineHeight: 1.6, marginBottom: 22 }}>
-              This will clear all overrides, conflicts and sign-offs and restore the demo to its starting state.
+              This resets both Demand Planning and Supply Planning to their original seeded values — all adjustments, forecasts, production plans, inventory, and overrides will be cleared.
             </div>
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button onClick={() => setShowResetModal(false)}

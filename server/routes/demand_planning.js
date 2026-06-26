@@ -1090,17 +1090,10 @@ router.post('/model/finalize', (req, res) => {
 });
 
 // ── Disaggregation helpers ────────────────────────────────────────────────────
-// 7 planning month blocks, each 4 weeks wide, rolling from EDITABLE_FROM_WEEK.
-// +1M = weeks 24-27, +2M = weeks 28-31, ..., +6M = weeks 44-47, +7M = weeks 48-52.
-const DISAGG_NUM_MONTHS = 7;
-const DISAGG_MONTH_BLOCKS = (() => {
-  const blocks = {};
-  for (let m = 1; m <= DISAGG_NUM_MONTHS; m++) {
-    const blockStart = EDITABLE_FROM_WEEK + (m - 1) * 4;
-    blocks[m] = { start: blockStart, end: m === DISAGG_NUM_MONTHS ? 52 : blockStart + 3 };
-  }
-  return blocks;
-})();
+// 1 planning period = 1 week_number, matching the grid/WhatIf +NM convention.
+// Chip +NM → week EDITABLE_FROM_WEEK + N  (+1M = wk 25, +2M = wk 26 … +28M = wk 52).
+// UI shows +1M–+12M (wks 25–36); server accepts any valid offset 1–28.
+const DISAGG_MAX_OFFSET = 52 - EDITABLE_FROM_WEEK; // 28
 
 // Distribute `totalRounded` integer units among items proportional to item.raw.
 // Uses the largest-remainder method so the sum equals totalRounded exactly.
@@ -1128,12 +1121,13 @@ function computeDisaggregation(db, { category, totalAdjustment, targetMonths, ro
   if (!Number.isFinite(total) || total === 0) throw new Error('totalAdjustment must be a non-zero integer');
   if (!Array.isArray(targetMonths) || targetMonths.length === 0) throw new Error('targetMonths must be a non-empty array');
 
-  // Build target-weeks list from rolling 4-week planning month blocks
+  // Each +NM chip = exactly one week_number: EDITABLE_FROM_WEEK + N
   const tgtWeeks = [];
   for (const m of targetMonths) {
-    const block = DISAGG_MONTH_BLOCKS[m];
-    if (!block) throw new Error(`Invalid planning month: ${m} (must be 1–${DISAGG_NUM_MONTHS})`);
-    for (let w = block.start; w <= block.end; w++) tgtWeeks.push(w);
+    const w = EDITABLE_FROM_WEEK + Number(m);
+    if (w <= EDITABLE_FROM_WEEK || w > 52)
+      throw new Error(`Invalid planning period: +${m}M (offset must be 1–${DISAGG_MAX_OFFSET})`);
+    tgtWeeks.push(w);
   }
   if (!tgtWeeks.length) throw new Error('No target weeks found for selected months');
 
@@ -1226,18 +1220,13 @@ function computeDisaggregation(db, { category, totalAdjustment, targetMonths, ro
       const sfItems = tgtWeeks.map(w => ({ key: String(w), raw: sfMap[w] || 0 }));
       const weekAmounts = largestRemainder(sfItems, locAmount);
 
-      // Aggregate weeks → months for user-facing display
+      // Each chip = one week; map directly
       const monthlyAmounts = {};
       const currentMonthlyAdj = {};
       for (const m of targetMonths) {
-        const { start, end } = DISAGG_MONTH_BLOCKS[m];
-        let splitSum = 0, curSum = 0;
-        for (let w = start; w <= end; w++) {
-          splitSum += weekAmounts[String(w)] || 0;
-          curSum   += (curBySL[slKey] || {})[w] || 0;
-        }
-        monthlyAmounts[m]    = splitSum;
-        currentMonthlyAdj[m] = curSum;
+        const w = EDITABLE_FROM_WEEK + Number(m);
+        monthlyAmounts[m]    = weekAmounts[String(w)] || 0;
+        currentMonthlyAdj[m] = (curBySL[slKey] || {})[w] || 0;
       }
 
       rows.push({ sku, locationId: locId, locationName: locNames[locId] || `Loc${locId}`,

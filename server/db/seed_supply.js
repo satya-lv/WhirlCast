@@ -249,7 +249,7 @@ function computeAllPlanning(demandOverride) {
         const sf  = scale[plantName][lc][w];
         // At planning-horizon start, inject a 4-week demand buffer if current
         // inventory is lower — gives each SKU a healthy starting position.
-        const beginInv = w === 24 ? Math.max(prevEndInv, d * 4.0) : prevEndInv;
+        const beginInv = w === 24 ? Math.max(prevEndInv, d * 1.5) : prevEndInv;
 
         const targetEnd     = d * ssWks;
         const unconstr      = Math.max(0, d + targetEnd - beginInv);
