@@ -22,6 +22,7 @@ import ForecastingReport from './pages/ForecastingReport';
 import AdminConsole from './pages/AdminConsole';
 import SupplyPlanning from './pages/SupplyPlanning';
 import DemandPlanning from './pages/DemandPlanning';
+import ExecutiveCockpit from './pages/ExecutiveCockpit';
 
 // ── Route protection ───────────────────────────────────────────────────────
 
@@ -69,7 +70,8 @@ function AppRoutes() {
       {/* Admin: allow both 'admin' (existing auth flow) and 'demand_planning' (persona landing → Admin card) */}
       <Route path="/admin"         element={<ProtectedRoute allowedRoles={['admin', 'demand_planning']}><AdminConsole /></ProtectedRoute>} />
       <Route path="/supply"            element={<ProtectedRoute allowedRoles={['demand_planning']}><SupplyPlanning /></ProtectedRoute>} />
-      <Route path="/demand-planning"   element={<ProtectedRoute allowedRoles={['demand_planning']}><DemandPlanning /></ProtectedRoute>} />
+      <Route path="/demand-planning"      element={<ProtectedRoute allowedRoles={['demand_planning']}><DemandPlanning /></ProtectedRoute>} />
+      <Route path="/executive-cockpit"   element={<ProtectedRoute allowedRoles={['demand_planning']}><ExecutiveCockpit /></ProtectedRoute>} />
       <Route path="*"              element={<Navigate to="/" replace />} />
     </Routes>
   );

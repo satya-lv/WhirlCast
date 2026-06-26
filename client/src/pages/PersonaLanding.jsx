@@ -7,12 +7,11 @@ const MODULES = [
   {
     id: 'executive',
     title: 'Executive Cockpit',
-    desc: 'Consolidated S&OP overview for senior leadership — key KPIs, exception summaries, and scenario comparisons.',
+    desc: 'Consolidated S&OP overview for senior leadership — key KPIs, exception summaries, and recommended actions.',
     icon: '📊',
     color: '#8B5CF6',
     bg: 'rgba(139,92,246,0.15)',
     border: 'rgba(139,92,246,0.3)',
-    comingSoon: true,
   },
   {
     id: 'demand',
@@ -49,7 +48,6 @@ export default function PersonaLanding() {
   const { login } = useAuth();
   const { persona, setPersona } = usePersona();
   const [hovered, setHovered] = useState(null);
-  const [execExpanded, setExecExpanded] = useState(false);
 
   useEffect(() => {
     if (!persona?.displayName) {
@@ -60,8 +58,9 @@ export default function PersonaLanding() {
   if (!persona?.displayName) return null;
 
   const handleSelect = (mod) => {
-    if (mod.comingSoon) {
-      setExecExpanded(true);
+    if (mod.id === 'executive') {
+      login({ role: 'demand_planning', name: persona.displayName });
+      navigate('/executive-cockpit');
       return;
     }
     if (mod.id === 'admin') {
@@ -110,7 +109,7 @@ export default function PersonaLanding() {
         {MODULES.map(mod => (
           <div
             key={mod.id}
-            onMouseEnter={() => !mod.comingSoon && setHovered(mod.id)}
+            onMouseEnter={() => setHovered(mod.id)}
             onMouseLeave={() => setHovered(null)}
             onClick={() => handleSelect(mod)}
             style={{
@@ -120,34 +119,17 @@ export default function PersonaLanding() {
               display: 'flex', flexDirection: 'column', gap: 12,
               transition: 'all 0.2s ease',
               transform: hovered === mod.id ? 'translateY(-4px)' : 'none',
-              cursor: mod.comingSoon ? 'default' : 'pointer',
+              cursor: 'pointer',
               position: 'relative',
             }}
           >
-            {mod.comingSoon && (
-              <span style={{
-                position: 'absolute', top: 14, right: 14,
-                fontSize: 8, fontWeight: 700, letterSpacing: '0.5px',
-                padding: '2px 7px', borderRadius: 8,
-                background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.35)',
-              }}>SOON</span>
-            )}
             <div style={{ fontSize: 30 }}>{mod.icon}</div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: mod.comingSoon ? 'rgba(255,255,255,0.35)' : 'white' }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: 'white' }}>
               {mod.title}
             </div>
             <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', lineHeight: 1.55, flex: 1 }}>
               {mod.desc}
             </div>
-            {execExpanded && mod.id === 'executive' && (
-              <div style={{
-                fontSize: 12, fontWeight: 600, color: 'rgba(139,92,246,0.9)',
-                background: 'rgba(139,92,246,0.1)', border: '0.5px solid rgba(139,92,246,0.3)',
-                borderRadius: 8, padding: '8px 12px', textAlign: 'center',
-              }}>
-                Coming soon — not yet available
-              </div>
-            )}
           </div>
         ))}
       </div>

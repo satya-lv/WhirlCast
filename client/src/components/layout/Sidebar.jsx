@@ -6,7 +6,7 @@ import {
   LayoutDashboard, BarChart2, GitBranch, Zap, Plus,
   Layers, TrendingUp, FlaskConical, Activity, Package, ArrowLeftRight,
   Users, AlertTriangle, Truck,
-  Shield, CheckSquare, Sliders,
+  Shield, CheckSquare, Sliders, PieChart,
   FileBarChart, Settings, LogOut, Sun, Moon, RotateCcw, UserX,
 } from 'lucide-react';
 
@@ -17,7 +17,8 @@ const NAV_GROUPS = [
     group: 'Overview',
     roles: ['demand_planning'],
     items: [
-      { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard, roles: ['demand_planning'] },
+      { label: 'Executive Cockpit', path: '/executive-cockpit', icon: PieChart,       roles: ['demand_planning'] },
+      { label: 'Dashboard',         path: '/dashboard',         icon: LayoutDashboard, roles: ['demand_planning'] },
     ],
   },
   {
